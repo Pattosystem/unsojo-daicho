@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>運送状台帳</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root{
+  --bg:#f5f4f0; --panel:#ffffff; --ink:#1d2329; --sub:#5d6670; --line:#dedbd3;
+  --accent:#1f4e79; --accent-soft:#e6eef6;
+  --warn:#9a5b00; --warn-bg:#fff4e0; --err:#a42828; --err-bg:#fdeaea;
+  --ok:#2e6b3a; --ok-bg:#e7f3e9; --muted-bg:#efede8;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans JP",system-ui,sans-serif;font-size:14px}
+button{font:inherit;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+.hidden{display:none!important}
+
+header{background:var(--panel);border-bottom:1px solid var(--line);padding:0 20px;display:flex;align-items:center;gap:24px;height:56px;position:sticky;top:0;z-index:10}
+header h1{font-size:16px;margin:0;letter-spacing:.04em}
+nav{display:flex;gap:4px}
+nav button{background:none;border:none;padding:8px 14px;border-radius:6px;color:var(--sub)}
+nav button.on{background:var(--accent-soft);color:var(--accent);font-weight:700}
+header .who{margin-left:auto;color:var(--sub);font-size:12px;display:flex;gap:10px;align-items:center}
+main{max-width:1280px;margin:0 auto;padding:20px}
+
+.btn{border:1px solid var(--line);background:var(--panel);padding:7px 14px;border-radius:6px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+.btn.danger{color:var(--err);border-color:#e5b9b9}
+.btn.small{padding:4px 10px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:default}
+
+#login{max-width:360px;margin:12vh auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:28px}
+#login h2{margin:0 0 18px;font-size:18px}
+#login label{display:block;font-size:12px;color:var(--sub);margin:12px 0 4px}
+#login input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px}
+#login .btn{width:100%;margin-top:18px}
+#loginErr{color:var(--err);font-size:12px;margin-top:10px}
+
+#drop{border:2px dashed #b9c4cf;border-radius:10px;background:var(--panel);padding:36px;text-align:center;color:var(--sub);transition:.15s}
+#drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+#drop strong{display:block;font-size:16px;color:var(--ink);margin-bottom:6px}
+#drop .row{margin-top:14px;display:flex;gap:8px;justify-content:center}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-top:18px;overflow:hidden}
+.card-head{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:#faf9f6}
+.card-head .fname{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-head .state{margin-left:auto;font-size:12px;color:var(--sub)}
+.card-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr)}
+.card-body iframe{width:100%;height:680px;border:0;border-right:1px solid var(--line);background:#e9e7e1}
+.form{padding:16px;overflow:auto;max-height:680px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+.f label{display:block;font-size:11px;color:var(--sub);margin-bottom:3px}
+.f input,.f select,.f textarea{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:#fff}
+.f input[readonly]{background:var(--muted-bg)}
+.f.wide{grid-column:1/-1}
+.f .inline{display:flex;gap:6px}
+.num{font-family:var(--mono);text-align:right}
+h4{margin:18px 0 8px;font-size:13px}
+.typebar{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.typebar label{font-size:12px;color:var(--sub)}
+.typebar select{padding:6px 8px;border:1px solid var(--line);border-radius:5px;font-weight:500}
+table.items{width:100%;border-collapse:collapse;font-size:12px}
+table.items th{font-weight:500;color:var(--sub);text-align:left;padding:4px;border-bottom:1px solid var(--line);font-size:11px;white-space:nowrap}
+table.items td{padding:3px 2px}
+table.items input{width:100%;padding:5px 6px;border:1px solid var(--line);border-radius:4px}
+table.items input.diff{border-color:#e0a14a;background:var(--warn-bg)}
+table.items .x{border:none;background:none;color:var(--sub);font-size:16px;padding:0 4px}
+.alerts{margin-top:14px;display:flex;flex-direction:column;gap:6px}
+.alert{padding:8px 10px;border-radius:6px;font-size:12px;line-height:1.5}
+.alert.warn{background:var(--warn-bg);color:var(--warn)}
+.alert.err{background:var(--err-bg);color:var(--err)}
+.alert.ok{background:var(--ok-bg);color:var(--ok)}
+.alert.info{background:var(--accent-soft);color:var(--accent)}
+.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.toolbar input,.toolbar select{padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.toolbar input[type=search]{min-width:240px}
+.toolbar .count{color:var(--sub);font-size:12px;margin-left:auto}
+.tablewrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:auto}
+table.ledger{width:100%;border-collapse:collapse;font-size:13px}
+table.ledger th{position:sticky;top:0;background:#faf9f6;text-align:left;font-weight:500;color:var(--sub);font-size:11px;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.ledger td{padding:9px 10px;border-bottom:1px solid #eeece6;white-space:nowrap}
+table.ledger tr:hover td{background:#fbfaf7;cursor:pointer}
+.mono{font-family:var(--mono)}
+.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.tag.s-wait{background:var(--muted-bg);color:var(--sub)}
+.tag.s-notyet{background:var(--accent-soft);color:var(--accent)}
+.tag.s-check{background:var(--warn-bg);color:var(--warn)}
+.tag.s-done{background:var(--ok-bg);color:var(--ok)}
+.doc{display:inline-block;font-size:11px;padding:1px 6px;border-radius:4px;margin-right:4px}
+.doc.have{background:var(--ok-bg);color:var(--ok)}
+.doc.miss{background:var(--muted-bg);color:#9aa1a8}
+.wcount{color:var(--warn);font-size:12px}
+.empty{padding:40px;text-align:center;color:var(--sub)}
+
+#modal{position:fixed;inset:0;background:rgba(20,25,30,.45);display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px;z-index:50;overflow:auto}
+#modal .box{background:var(--panel);border-radius:10px;width:min(1120px,100%);padding:22px}
+#modal h3{margin:0 0 4px;font-size:17px}
+#modal .meta{color:var(--sub);font-size:12px;margin-bottom:6px}
+.sec{border-top:1px solid var(--line);margin-top:16px;padding-top:4px}
+.docrow{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px;flex-wrap:wrap}
+.docrow .lbl{width:120px;color:var(--sub);font-size:12px}
+.docrow .nm{flex:1;min-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.itemswrap{overflow:auto}
+
+@media (max-width:860px){
+  .card-body{grid-template-columns:1fr}
+  .card-body iframe{height:380px;border-right:0;border-bottom:1px solid var(--line)}
+  .form{max-height:none}
+  .grid{grid-template-columns:1fr}
+  header{gap:12px;padding:0 12px}
+  main{padding:16px}
+}
+</style>
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <h2>運送状台帳</h2>
+  <label>メールアドレス</label><input id="email" type="email" autocomplete="username">
+  <label>パスワード</label><input id="pw" type="password" autocomplete="current-password">
+  <button class="btn primary" id="loginBtn">ログイン</button>
+  <div id="loginErr"></div>
+</section>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>運送状台帳</h1>
+    <nav>
+      <button data-tab="import" class="on">取込</button>
+      <button data-tab="ledger">荷物一覧</button>
+    </nav>
+    <div class="who"><span id="userEmail"></span><button class="btn" id="logoutBtn">ログアウト</button></div>
+  </header>
+
+  <main>
+    <section id="tab-import">
+      <div id="drop">
+        <strong>ここに運送状・インボイスのPDFをドラッグ＆ドロップ</strong>
+        どちらか片方だけでも、まとめてでも入れられます。AWB番号が同じものは1件の荷物にまとめます。
+        <div class="row">
+          <button class="btn" id="pickBtn">ファイルを選ぶ</button>
+        </div>
+        <input type="file" id="fileInput" accept="application/pdf" multiple class="hidden">
+      </div>
+      <div id="queue"></div>
+    </section>
+
+    <section id="tab-ledger" class="hidden">
+      <div class="toolbar">
+        <input type="search" id="q" placeholder="AWB・発送元・インボイス番号・商品名で検索">
+        <select id="fStatus">
+          <option value="">状態：すべて</option>
+          <option>書類待ち</option>
+          <option>未着</option>
+          <option>到着・確認中</option>
+          <option>確認済</option>
+        </select>
+        <input type="month" id="fMonth" title="発送月">
+        <label style="font-size:12px;color:var(--sub);display:flex;gap:4px;align-items:center"><input type="checkbox" id="fWarn">警告ありのみ</label>
+        <button class="btn" id="csvBtn">CSV出力</button>
+        <span class="count" id="count"></span>
+      </div>
+      <div class="tablewrap">
+        <table class="ledger">
+          <thead><tr>
+            <th>発送日</th><th>AWB番号</th><th>運送会社</th><th>発送元</th><th>内容</th>
+            <th>書類</th><th style="text-align:right">合計</th><th>到着日</th><th>状態</th><th></th>
+          </tr></thead>
+          <tbody id="ledgerBody"></tbody>
+        </table>
+        <div class="empty hidden" id="ledgerEmpty">まだ登録がありません</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="hidden"><div class="box" id="modalBox"></div></div>
+
+<script>
+// =========================================================
+// 設定（INVOICE台帳と同じSupabaseプロジェクト）
+// =========================================================
+const SUPABASE_URL = "https://dunfssyisxywxfcblgdg.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR1bmZzc3lpc3h5d3hmY2JsZ2RnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwNjYwODEsImV4cCI6MjEwODY0MjA4MX0.pWqKvj7sLg9z3rjSGKqPPl7YLi-FFKDcuoFlDCLkZck";
+// 読み取り機能（Edge Function）の名前。Supabaseで付けた名前と同じにしてください
+const FN_NAME = "read-shipping-doc";
+// =========================================================
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const BUCKET = "shipping-docs";
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const normA = (s) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+const normAwb = (s) => String(s ?? "").toUpperCase().replace(/[\s\-]/g, "");
+const toNum = (v) => { if (v === "" || v == null) return null; const n = Number(String(v).replace(/,/g, "")); return isNaN(n) ? null : n; };
+const fmt = (n, d = 2) => n == null ? "" : Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtN = (n, max = 3) => n == null ? "" : Number(n).toLocaleString("en-US", { maximumFractionDigits: max });
+const DOC_LABEL = { waybill: "運送状", invoice: "インボイス" };
+
+// ---------- 項目定義（k = データベースの列、fn = 読み取り結果の名前） ----------
+const WB_FIELDS = [
+  { k: "carrier",      fn: "carrier",   label: "運送会社" },
+  { k: "wb_service",   fn: "service",   label: "サービス" },
+  { k: "wb_ship_date", fn: "ship_date", label: "発送日", t: "date" },
+  { k: "wb_ref_no",    fn: "ref_no",    label: "参照番号（Ref No）" },
+  { k: "wb_shipper",   fn: "shipper",   label: "発送元" },
+  { k: "wb_consignee", fn: "consignee", label: "送り先" },
+  { k: "wb_weight",    fn: "weight_kg", label: "重量（kg）", t: "n3" },
+  { k: "wb_pieces",    fn: "pieces",    label: "個数" },
+  { k: "wb_content",   fn: "content",   label: "内容（Content）", wide: true },
+];
+const INV_FIELDS = [
+  { k: "inv_no",        fn: "invoice_no",      label: "インボイス番号" },
+  { k: "inv_date",      fn: "invoice_date",    label: "インボイス日付", t: "date" },
+  { k: "inv_shipper",   fn: "shipper",         label: "発送元" },
+  { k: "inv_consignee", fn: "consignee",       label: "送り先" },
+  { k: "currency",      fn: "currency",        label: "通貨" },
+  { k: "total_amount",  fn: "total_amount",    label: "合計金額", t: "n2" },
+  { k: "incoterm",      fn: "incoterm",        label: "取引条件" },
+  { k: "total_units",   fn: "total_units",     label: "合計数量", t: "n" },
+  { k: "net_weight",    fn: "net_weight_kg",   label: "正味重量（kg）", t: "n3" },
+  { k: "gross_weight",  fn: "gross_weight_kg", label: "総重量（kg）", t: "n3" },
+];
+const NUM_KEYS = new Set([...WB_FIELDS, ...INV_FIELDS].filter(f => f.t && f.t.startsWith("n")).map(f => f.k));
+
+function fieldVal(f, v) {
+  if (f.t === "n2") return fmt(v, 2);
+  if (f.t === "n3" || f.t === "n") return fmtN(v);
+  return v ?? "";
+}
+function fieldsHtml(list, src) {
+  return list.map(f => `
+    <div class="f ${f.wide ? "wide" : ""}"><label>${f.label}</label>
+      <input data-k="${f.k}" type="${f.t === "date" ? "date" : "text"}" class="${f.t && f.t.startsWith("n") ? "num" : ""}"
+             value="${esc(fieldVal(f, src[f.k]))}"></div>`).join("");
+}
+function readFields(el) {
+  const v = {};
+  el.querySelectorAll("[data-k]").forEach(i => {
+    const k = i.dataset.k, raw = i.value.trim();
+    v[k] = NUM_KEYS.has(k) ? toNum(raw) : (raw || null);
+  });
+  if (v.currency) v.currency = v.currency.toUpperCase();
+  return v;
+}
+
+// ---------- 明細表 ----------
+const ITEM_COLS = [
+  { c: "description", label: "商品名", w: "26%" },
+  { c: "hs_code",     label: "HSコード" },
+  { c: "quantity",    label: "数量", num: 1, w: "7%" },
+  { c: "unit",        label: "単位", w: "6%" },
+  { c: "unit_price",  label: "単価", num: 1, w: "9%" },
+  { c: "subtotal",    label: "小計", num: 1, w: "10%" },
+  { c: "unit_weight", label: "1個重量kg", num: 1, w: "8%" },
+  { c: "origin",      label: "原産", w: "5%" },
+];
+const RECV_COLS = [
+  { c: "received_qty", label: "届いた数量", num: 1, w: "8%" },
+  { c: "check_note",   label: "確認メモ", w: "14%" },
+];
+function itemsTableHtml(withRecv) {
+  const cols = withRecv ? [...ITEM_COLS, ...RECV_COLS] : ITEM_COLS;
+  return `<div class="itemswrap"><table class="items"><thead><tr>${cols.map(c => `<th style="${c.w ? "width:" + c.w : ""}">${c.label}</th>`).join("")}<th></th></tr></thead><tbody></tbody></table></div>
+    <button class="btn small" data-act="addrow" style="margin-top:6px">＋ 明細を追加</button>`;
+}
+function cellVal(c, v) {
+  if (v == null) return "";
+  if (c.c === "subtotal") return fmt(v, 2);
+  if (c.num) return fmtN(v, 4);
+  return v;
+}
+function addItemRow(tbody, it, withRecv) {
+  const cols = withRecv ? [...ITEM_COLS, ...RECV_COLS] : ITEM_COLS;
+  const tr = document.createElement("tr");
+  tr.innerHTML = cols.map(c => `<td><input data-c="${c.c}" class="${c.num ? "num" : ""}" value="${esc(cellVal(c, it[c.c]))}"></td>`).join("")
+    + `<td><button class="x" title="この行を削除">×</button></td>`;
+  $(".x", tr).onclick = () => { const host = tr.closest("[data-host]"); tr.remove(); host && host.dispatchEvent(new Event("change", { bubbles: true })); };
+  tbody.appendChild(tr);
+}
+function readItems(el) {
+  const numC = new Set([...ITEM_COLS, ...RECV_COLS].filter(c => c.num).map(c => c.c));
+  return [...el.querySelectorAll("table.items tbody tr")].map((tr, idx) => {
+    const r = { line_no: idx + 1 };
+    tr.querySelectorAll("[data-c]").forEach(i => {
+      const raw = i.value.trim();
+      r[i.dataset.c] = numC.has(i.dataset.c) ? toNum(raw) : (raw || null);
+    });
+    return r;
+  }).filter(r => r.description || r.quantity != null || r.subtotal != null);
+}
+
+// ---------- 照合チェック（書類どうし・インボイス内・到着数量） ----------
+function crossCheck(s, items, hasWb, hasInv) {
+  const w = [];
+  const near = (a, b, tol) => Math.abs(a - b) <= tol;
+
+  if (hasWb && hasInv) {
+    if (s.wb_ref_no && s.inv_no && normA(s.wb_ref_no) !== normA(s.inv_no))
+      w.push(`運送状の参照番号（${s.wb_ref_no}）とインボイス番号（${s.inv_no}）が一致しません`);
+    if (s.wb_shipper && s.inv_shipper) {
+      const a = normA(s.wb_shipper), b = normA(s.inv_shipper);
+      if (a && b && !a.includes(b) && !b.includes(a))
+        w.push(`発送元が運送状（${s.wb_shipper}）とインボイス（${s.inv_shipper}）で異なります`);
+    }
+    if (s.wb_weight != null && s.gross_weight != null && !near(s.wb_weight, s.gross_weight, 0.05))
+      w.push(`重量が運送状（${fmtN(s.wb_weight)} kg）とインボイスの総重量（${fmtN(s.gross_weight)} kg）で異なります`);
+    if (s.wb_content) {
+      s.wb_content.split(/[,、;\n]/).map(t => t.trim()).filter(t => normA(t).length >= 4).forEach(t => {
+        const nt = normA(t);
+        const hit = items.some(it => { const d = normA(it.description); return d && (d.includes(nt) || nt.includes(d)); });
+        if (!hit) w.push(`運送状の内容「${t}」が、インボイスの明細に見当たりません（商品名の食い違いの可能性）`);
+      });
+    }
+  }
+
+  if (hasInv) {
+    items.forEach(r => {
+      if (r.quantity != null && r.unit_price != null && r.subtotal != null && !near(r.quantity * r.unit_price, r.subtotal, 0.01))
+        w.push(`明細${r.line_no}行目：数量×単価（${fmt(r.quantity * r.unit_price)}）と小計（${fmt(r.subtotal)}）が一致しません`);
+    });
+    const sum = items.reduce((a, r) => a + (r.subtotal ?? 0), 0);
+    if (s.total_amount != null && items.length && !near(sum, s.total_amount, 0.01))
+      w.push(`明細の小計合計（${fmt(sum)}）と合計金額（${fmt(s.total_amount)}）が一致しません`);
+    const qty = items.reduce((a, r) => a + (r.quantity ?? 0), 0);
+    if (s.total_units != null && items.length && !near(qty, s.total_units, 0.001))
+      w.push(`明細の数量合計（${fmtN(qty)}）とインボイスの合計数量（${fmtN(s.total_units)}）が一致しません`);
+    const wt = s.net_weight ?? s.gross_weight;
+    if (wt != null && items.length && items.every(r => r.unit_weight != null && r.quantity != null)) {
+      const calc = items.reduce((a, r) => a + r.unit_weight * r.quantity, 0);
+      if (!near(calc, wt, 0.05))
+        w.push(`1個重量×数量の合計（${fmtN(calc)} kg）とインボイスの重量（${fmtN(wt)} kg）が一致しません（数量の誤りの可能性）`);
+    }
+  }
+
+  if (s.arrival_date) {
+    items.forEach(r => {
+      if (r.received_qty != null && r.quantity != null && !near(r.received_qty, r.quantity, 0.001))
+        w.push(`明細${r.line_no}行目（${r.description}）：インボイス ${fmtN(r.quantity)} に対し、届いた数量 ${fmtN(r.received_qty)}`);
+    });
+  }
+  return w;
+}
+
+function statusOf(s) {
+  const types = (s.shipment_docs || []).map(d => d.doc_type);
+  if (s.confirmed_at) return "確認済";
+  if (s.arrival_date) return "到着・確認中";
+  if (!types.includes("waybill") || !types.includes("invoice")) return "書類待ち";
+  return "未着";
+}
+const STATUS_CLS = { "書類待ち": "s-wait", "未着": "s-notyet", "到着・確認中": "s-check", "確認済": "s-done" };
+
+// ---------- PDFの中の文字データを取り出す（印字との食い違い検出用） ----------
+async function pdfTextLayer(file) {
+  try {
+    if (!window.pdfjsLib) return "";
+    const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    let all = "";
+    for (let p = 1; p <= doc.numPages; p++) {
+      const tc = await (await doc.getPage(p)).getTextContent();
+      all += tc.items.map(i => i.str).join("");
+    }
+    return normA(all);
+  } catch { return ""; }
+}
+
+// ---------- ログイン ----------
+async function boot() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) showApp(session.user); else $("#login").classList.remove("hidden");
+}
+$("#loginBtn").onclick = async () => {
+  $("#loginErr").textContent = "";
+  const { data, error } = await sb.auth.signInWithPassword({ email: $("#email").value.trim(), password: $("#pw").value });
+  if (error) { $("#loginErr").textContent = "ログインできませんでした。メールアドレスとパスワードを確認してください。"; return; }
+  $("#login").classList.add("hidden"); showApp(data.user);
+};
+$("#pw").addEventListener("keydown", e => { if (e.key === "Enter") $("#loginBtn").click(); });
+$("#logoutBtn").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+function showApp(user) { $("#userEmail").textContent = user.email; $("#app").classList.remove("hidden"); }
+
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  $("#tab-import").classList.toggle("hidden", b.dataset.tab !== "import");
+  $("#tab-ledger").classList.toggle("hidden", b.dataset.tab !== "ledger");
+  if (b.dataset.tab === "ledger") loadLedger();
+});
+
+// ---------- 取込 ----------
+const drop = $("#drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => handleFiles(e.dataTransfer.files));
+$("#pickBtn").onclick = () => $("#fileInput").click();
+$("#fileInput").onchange = e => { handleFiles(e.target.files); e.target.value = ""; };
+
+function handleFiles(list) {
+  [...list].forEach(f => {
+    if (f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) { alert(f.name + " はPDFではありません"); return; }
+    addCard(f);
+  });
+}
+const fileToBase64 = (file) => new Promise((ok, ng) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(",")[1]);
+  r.onerror = ng; r.readAsDataURL(file);
+});
+
+function addCard(file) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <div class="card-head">
+      <span class="fname">${esc(file.name)}</span>
+      <span class="state"><span class="spinner"></span>読み取り中…</span>
+    </div>
+    <div class="card-body">
+      <iframe src="${URL.createObjectURL(file)}#view=FitH"></iframe>
+      <div class="form" data-host></div>
+    </div>`;
+  $("#queue").prepend(card);
+  readDoc({ card, file });
+}
+
+async function readDoc(ctx) {
+  const state = $(".state", ctx.card);
+  const textP = pdfTextLayer(ctx.file);
+  let doc;
+  try {
+    const pdf_base64 = await fileToBase64(ctx.file);
+    const { data, error } = await sb.functions.invoke(FN_NAME, { body: { pdf_base64 } });
+    if (error) {
+      let detail = error.message;
+      try { const b = await error.context.json(); detail = `(${error.context.status}) ` + (b.error || b.msg || b.message || JSON.stringify(b)); }
+      catch (_) { try { detail = `(${error.context.status}) ` + await error.context.text(); } catch (_) {} }
+      throw new Error(detail);
+    }
+    if (!data?.doc) throw new Error(data?.error || "不明なエラー");
+    doc = data.doc;
+    state.textContent = "読み取り完了・内容を確認してください";
+  } catch (e) {
+    state.textContent = "読み取りに失敗（手入力できます）";
+    doc = { doc_type: "invoice", items: [], notes: ["自動読み取りに失敗しました：" + e.message] };
+  }
+  ctx.textLayer = await textP;
+  ctx.raw = doc;
+  ctx.type = doc.doc_type === "waybill" ? "waybill" : "invoice";
+  if (doc.doc_type === "other") (doc.notes = doc.notes || []).unshift("運送状・インボイスのどちらとも判別できませんでした。種類を選んでください");
+  renderImport(ctx);
+}
+
+// 読み取り結果（fn名）→ データベースの列名に変換
+function rawToFields(raw, type) {
+  const o = {};
+  (type === "waybill" ? WB_FIELDS : INV_FIELDS).forEach(f => o[f.k] = raw[f.fn] ?? null);
+  if (type === "invoice" && raw.carrier) o.carrier = raw.carrier;
+  return o;
+}
+
+function renderImport(ctx) {
+  const form = $(".form", ctx.card);
+  const raw = ctx.raw, type = ctx.type;
+  const keepAwb = form.querySelector("[data-awb]")?.value;
+  const src = rawToFields(raw, type);
+  form.innerHTML = `
+    <div class="typebar">
+      <label>書類の種類</label>
+      <select data-type>
+        <option value="waybill" ${type === "waybill" ? "selected" : ""}>運送状</option>
+        <option value="invoice" ${type === "invoice" ? "selected" : ""}>インボイス</option>
+      </select>
+    </div>
+    <div class="grid">
+      <div class="f wide"><label>AWB番号（荷物をまとめる番号）</label><input data-awb class="mono" value="${esc(keepAwb ?? normAwb(raw.awb_no))}"></div>
+      ${fieldsHtml(type === "waybill" ? WB_FIELDS : INV_FIELDS.concat([{ k: "carrier", label: "運送会社" }]), src)}
+    </div>
+    ${type === "invoice" ? `<h4>明細</h4>${itemsTableHtml(false)}` : ""}
+    <div class="alerts"></div>
+    <div class="actions">
+      <button class="btn" data-act="recheck">再チェック</button>
+      <button class="btn danger" data-act="discard">破棄</button>
+      <button class="btn primary" data-act="save">登録する</button>
+    </div>`;
+  if (type === "invoice") {
+    const tbody = $("tbody", form);
+    const items = (raw.items || []).map(it => ({ ...it, unit_weight: it.unit_weight_kg ?? it.unit_weight }));
+    (items.length ? items : [{}]).forEach(it => addItemRow(tbody, it, false));
+  }
+  $("[data-type]", form).onchange = (e) => { ctx.type = e.target.value; renderImport(ctx); };
+  form.onclick = (e) => {
+    const act = e.target.dataset.act;
+    if (act === "addrow") { addItemRow($("tbody", form), {}, false); }
+    if (act === "recheck") importChecks(ctx);
+    if (act === "discard" && confirm("この取込を破棄しますか？")) ctx.card.remove();
+    if (act === "save") saveImport(ctx, e.target);
+  };
+  form.onchange = (e) => { if (!e.target.matches("[data-type]")) importChecks(ctx); };
+  importChecks(ctx);
+}
+
+function collectImport(ctx) {
+  const form = $(".form", ctx.card);
+  const gridFields = readFields($(".grid", form));
+  return {
+    type: ctx.type,
+    awb: normAwb($("[data-awb]", form).value),
+    fields: gridFields,
+    items: ctx.type === "invoice" ? readItems(form) : [],
+  };
+}
+
+async function fetchShipment(awb) {
+  const { data } = await sb.from("shipments").select("*, shipment_docs(*), shipment_items(*)").eq("awb_no", awb).maybeSingle();
+  if (data) data.shipment_items = (data.shipment_items || []).sort((a, b) => a.line_no - b.line_no);
+  return data;
+}
+
+async function importChecks(ctx) {
+  const seq = (ctx.seq = (ctx.seq || 0) + 1);
+  const v = collectImport(ctx);
+  const hard = [], warns = [], infos = [];
+  ctx.docWarns = [];
+
+  if (!v.awb) hard.push("AWB番号が空です");
+  if (v.type === "invoice" && !v.items.length) hard.push("明細が1行もありません");
+  v.items.forEach(r => { if (!r.description) hard.push(`明細${r.line_no}行目の商品名が空です`); });
+
+  let existing = null;
+  if (v.awb) {
+    existing = await fetchShipment(v.awb);
+    if (seq !== ctx.seq) return;  // 入力中に古いチェック結果で上書きしない
+    const types = (existing?.shipment_docs || []).map(d => d.doc_type);
+    if (types.includes(v.type))
+      hard.push(`このAWB（${v.awb}）の${DOC_LABEL[v.type]}はすでに登録されています。差し替える場合は、荷物一覧の詳細で書類を削除してから入れ直してください`);
+    const other = v.type === "waybill" ? "invoice" : "waybill";
+    if (!existing) infos.push(`新しい荷物として登録します。${DOC_LABEL[other]}は後から追加できます`);
+    else if (types.includes(other)) infos.push(`登録済みの${DOC_LABEL[other]}（AWB ${v.awb}）とまとめて、照合します`);
+    else infos.push(`登録済みの荷物（AWB ${v.awb}）に追加します`);
+
+    const merged = { ...(existing || {}), ...v.fields };
+    const hasWb = v.type === "waybill" || types.includes("waybill");
+    const hasInv = v.type === "invoice" || types.includes("invoice");
+    const items = v.type === "invoice" ? v.items : (existing?.shipment_items || []);
+    warns.push(...crossCheck(merged, items, hasWb, hasInv));
+  }
+
+  // 印字とPDF内部の文字データの食い違い（インボイスの商品名）
+  if (v.type === "invoice" && ctx.textLayer) {
+    v.items.forEach(r => {
+      const d = normA(r.description);
+      if (d && !ctx.textLayer.includes(d))
+        ctx.docWarns.push(`PDFの中の文字データに「${r.description}」が見つかりません。印字されている文字と、PDF内部の文字データが異なる可能性があります（現物の商品名を確認してください）`);
+    });
+  }
+  warns.push(...ctx.docWarns);
+
+  ctx.hard = hard; ctx.warns = warns; ctx.existing = existing;
+  $(".alerts", ctx.card).innerHTML =
+    hard.map(t => `<div class="alert err">✕ ${esc(t)}</div>`).join("") +
+    warns.map(t => `<div class="alert warn">⚠ ${esc(t)}</div>`).join("") +
+    infos.map(t => `<div class="alert info">${esc(t)}</div>`).join("") +
+    (ctx.raw.notes || []).map(t => `<div class="alert info">読み取りメモ：${esc(t)}</div>`).join("") +
+    (!hard.length && !warns.length ? `<div class="alert ok">✓ 照合チェックに問題はありません</div>` : "");
+}
+
+async function saveImport(ctx, btn) {
+  await importChecks(ctx);
+  if (ctx.hard.length) { alert("登録できません：\n・" + ctx.hard.join("\n・")); return; }
+  if (ctx.warns.length && !confirm("警告があります。このまま登録しますか？（荷物一覧でも警告が表示されます）\n\n・" + ctx.warns.join("\n・"))) return;
+
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>登録中…';
+  const v = collectImport(ctx);
+  const pdf_path = `${v.awb}/${v.type}-${crypto.randomUUID()}.pdf`;
+  let createdId = null;
+  try {
+    const up = await sb.storage.from(BUCKET).upload(pdf_path, ctx.file, { contentType: "application/pdf" });
+    if (up.error) throw up.error;
+
+    // 荷物（AWB）を作る or 既存に追記
+    const fields = { ...v.fields, updated_at: new Date().toISOString() };
+    let ship = await fetchShipment(v.awb);
+    if (ship) {
+      if (ship.carrier && v.type === "invoice") delete fields.carrier;
+      const { error } = await sb.from("shipments").update(fields).eq("id", ship.id);
+      if (error) throw error;
+    } else {
+      const { data, error } = await sb.from("shipments").insert({ awb_no: v.awb, ...fields }).select().single();
+      if (error) {
+        if (!String(error.message).includes("duplicate")) throw error;
+        ship = await fetchShipment(v.awb);   // 別のパソコンで同時に登録された場合
+        const u = await sb.from("shipments").update(fields).eq("id", ship.id);
+        if (u.error) throw u.error;
+      } else { ship = data; createdId = data.id; }
+    }
+
+    const d = await sb.from("shipment_docs").insert({
+      shipment_id: ship.id, doc_type: v.type, pdf_path, pdf_name: ctx.file.name,
+      notes: (ctx.raw.notes || []).join("\n") || null,
+      warning_note: ctx.docWarns.length ? ctx.docWarns.join("\n") : null,
+    });
+    if (d.error) throw d.error;
+
+    if (v.type === "invoice") {
+      const ins = await sb.from("shipment_items").insert(v.items.map(r => ({ ...r, shipment_id: ship.id })));
+      if (ins.error) { await sb.from("shipment_docs").delete().eq("shipment_id", ship.id).eq("doc_type", "invoice"); throw ins.error; }
+    }
+
+    $(".state", ctx.card).textContent = "登録しました";
+    $(".card-body", ctx.card).innerHTML = `<div class="form"><div class="alert ok">✓ AWB ${esc(v.awb)} の${DOC_LABEL[v.type]}を登録しました${ctx.warns.length ? "（警告あり）" : ""}</div></div>`;
+    setTimeout(() => ctx.card.remove(), 4000);
+  } catch (e) {
+    await sb.storage.from(BUCKET).remove([pdf_path]);
+    if (createdId) await sb.from("shipments").delete().eq("id", createdId);
+    const msg = String(e.message || e);
+    alert("登録に失敗しました：" + (msg.includes("duplicate") ? `このAWBの${DOC_LABEL[v.type]}はすでに登録されています` : msg));
+    btn.disabled = false; btn.textContent = "登録する";
+  }
+}
+
+// ---------- 荷物一覧 ----------
+let LEDGER = [];
+async function loadLedger() {
+  const { data, error } = await sb.from("shipments").select("*, shipment_docs(*), shipment_items(*)").order("created_at", { ascending: false });
+  if (error) { alert("読み込みに失敗しました：" + error.message); return; }
+  LEDGER = data.map(r => {
+    r.shipment_items = (r.shipment_items || []).sort((a, b) => a.line_no - b.line_no);
+    const types = r.shipment_docs.map(d => d.doc_type);
+    r._hasWb = types.includes("waybill"); r._hasInv = types.includes("invoice");
+    r._status = statusOf(r);
+    r._warns = [...crossCheck(r, r.shipment_items, r._hasWb, r._hasInv),
+                ...r.shipment_docs.flatMap(d => d.warning_note ? d.warning_note.split("\n") : [])];
+    r._date = r.wb_ship_date || r.inv_date || "";
+    return r;
+  }).sort((a, b) => (b._date || "").localeCompare(a._date || "") || b.created_at.localeCompare(a.created_at));
+  drawLedger();
+}
+["q", "fStatus", "fMonth", "fWarn"].forEach(id => $("#" + id).addEventListener("input", drawLedger));
+
+function filtered() {
+  const q = normA($("#q").value), st = $("#fStatus").value, m = $("#fMonth").value, onlyW = $("#fWarn").checked;
+  return LEDGER.filter(r =>
+    (!st || r._status === st) && (!m || r._date.startsWith(m)) && (!onlyW || r._warns.length) &&
+    (!q || normA([r.awb_no, r.carrier, r.wb_shipper, r.inv_shipper, r.inv_no, r.wb_ref_no, r.wb_content, r.memo,
+                   ...r.shipment_items.map(i => i.description)].join(" ")).includes(q)));
+}
+
+function drawLedger() {
+  const rows = filtered();
+  $("#count").textContent = `${rows.length} 件`;
+  $("#ledgerEmpty").classList.toggle("hidden", rows.length > 0);
+  $("#ledgerBody").innerHTML = rows.map(r => {
+    const its = r.shipment_items;
+    const name = its[0] ? its[0].description + (its.length > 1 ? ` 他${its.length - 1}件` : "") : (r.wb_content || "");
+    return `<tr data-id="${r.id}">
+      <td class="mono">${esc(r._date)}</td>
+      <td class="mono">${esc(r.awb_no)}</td>
+      <td>${esc(r.carrier ?? "")}</td>
+      <td>${esc(r.wb_shipper || r.inv_shipper || "")}</td>
+      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(name)}</td>
+      <td><span class="doc ${r._hasWb ? "have" : "miss"}">運送状</span><span class="doc ${r._hasInv ? "have" : "miss"}">インボイス</span></td>
+      <td class="mono" style="text-align:right">${r.total_amount != null ? fmt(r.total_amount) + " " + esc(r.currency ?? "") : ""}</td>
+      <td class="mono">${esc(r.arrival_date ?? "")}</td>
+      <td><span class="tag ${STATUS_CLS[r._status]}">${r._status}</span></td>
+      <td>${r._warns.length ? `<span class="wcount">⚠ ${r._warns.length}</span>` : ""}</td></tr>`;
+  }).join("");
+  document.querySelectorAll("#ledgerBody tr").forEach(tr => tr.onclick = () => openDetail(tr.dataset.id));
+}
+
+// ---------- 詳細（その場で編集できる） ----------
+function openDetail(id) {
+  const r = LEDGER.find(x => x.id === id); if (!r) return;
+  const doc = (t) => r.shipment_docs.find(d => d.doc_type === t);
+  const docRow = (t) => {
+    const d = doc(t);
+    return `<div class="docrow"><span class="lbl">${DOC_LABEL[t]}</span>` + (d
+      ? `<span class="nm">${esc(d.pdf_name ?? "")}</span>
+         <button class="btn small" data-pdf="${t}">PDFを開く</button>
+         <button class="btn small danger" data-deldoc="${t}">書類を削除</button>`
+      : `<span class="nm" style="color:var(--sub)">未登録（取込タブから追加できます）</span>`) + `</div>`;
+  };
+  const docNotes = r.shipment_docs.flatMap(d => [
+    ...(d.warning_note ? d.warning_note.split("\n").map(t => ({ c: "warn", t: `⚠ ${t}` })) : []),
+    ...(d.notes ? d.notes.split("\n").map(t => ({ c: "info", t: `${DOC_LABEL[d.doc_type]}の読み取りメモ：${t}` })) : []),
+  ]);
+
+  $("#modalBox").innerHTML = `
+    <h3>AWB ${esc(r.awb_no)}　<span class="tag ${STATUS_CLS[r._status]}">${r._status}</span></h3>
+    <div class="meta">登録日時 ${new Date(r.created_at).toLocaleString("ja-JP")}${r.confirmed_at ? "　/　確認済 " + new Date(r.confirmed_at).toLocaleString("ja-JP") : ""}</div>
+    <div data-host id="dForm">
+      <div class="sec"><h4>書類</h4>${docRow("waybill")}${docRow("invoice")}</div>
+      ${r._hasWb ? `<div class="sec"><h4>運送状</h4><div class="grid">${fieldsHtml(WB_FIELDS, r)}</div></div>` : ""}
+      ${r._hasInv ? `<div class="sec"><h4>インボイス</h4><div class="grid">${fieldsHtml(INV_FIELDS.concat(r._hasWb ? [] : [{ k: "carrier", label: "運送会社" }]), r)}</div></div>
+        <div class="sec"><h4>明細と到着時の確認</h4>${itemsTableHtml(true)}</div>` : ""}
+      <div class="sec"><h4>到着</h4>
+        <div class="grid">
+          <div class="f"><label>到着日</label><div class="inline"><input data-arr type="date" value="${esc(r.arrival_date ?? "")}"><button class="btn small" data-act="today">今日</button></div></div>
+          <div class="f">${r._hasInv ? `<label>&nbsp;</label><button class="btn small" data-act="fillqty">届いた数量にインボイスの数量を入れる</button>` : ""}</div>
+          <div class="f wide"><label>メモ</label><textarea data-memo rows="2">${esc(r.memo ?? "")}</textarea></div>
+        </div>
+      </div>
+      <div class="alerts" id="dAlerts"></div>
+    </div>
+    <div class="actions">
+      <button class="btn danger" id="dDel">荷物ごと削除</button>
+      <span style="flex:1"></span>
+      <button class="btn" id="dClose">閉じる</button>
+      ${r.confirmed_at ? `<button class="btn" id="dUnconfirm">確認済を取り消す</button>` : `<button class="btn" id="dConfirm">確認済にする</button>`}
+      <button class="btn primary" id="dSave">保存</button>
+    </div>`;
+  $("#modal").classList.remove("hidden");
+
+  const f = $("#dForm");
+  if (r._hasInv) {
+    const tbody = $("tbody", f);
+    (r.shipment_items.length ? r.shipment_items : [{}]).forEach(it => addItemRow(tbody, it, true));
+  }
+  const ctx = { r, f };
+  const refresh = () => detailAlerts(ctx, docNotes);
+  f.addEventListener("change", refresh);
+  f.addEventListener("input", (e) => { if (e.target.matches("table.items input")) markDiffs(f); });
+  f.onclick = (e) => {
+    const act = e.target.dataset.act;
+    if (act === "addrow") { addItemRow($("tbody", f), {}, true); }
+    if (act === "today") { $("[data-arr]", f).value = new Date().toLocaleDateString("sv-SE"); refresh(); }
+    if (act === "fillqty") {
+      f.querySelectorAll("table.items tbody tr").forEach(tr => {
+        const rq = $('[data-c="received_qty"]', tr);
+        if (!rq.value) rq.value = $('[data-c="quantity"]', tr).value;
+      });
+      refresh();
+    }
+    if (e.target.dataset.pdf) openPdf(doc(e.target.dataset.pdf));
+    if (e.target.dataset.deldoc) deleteDoc(r, e.target.dataset.deldoc);
+  };
+  $("#dClose").onclick = closeModal;
+  $("#dSave").onclick = (e) => saveDetail(ctx, e.target, null);
+  if ($("#dConfirm")) $("#dConfirm").onclick = (e) => saveDetail(ctx, e.target, "confirm");
+  if ($("#dUnconfirm")) $("#dUnconfirm").onclick = (e) => saveDetail(ctx, e.target, "unconfirm");
+  $("#dDel").onclick = () => deleteShipment(r);
+  refresh();
+}
+
+function collectDetail(ctx) {
+  const f = ctx.f, v = {};
+  f.querySelectorAll(".grid").forEach(g => Object.assign(v, readFields(g)));
+  v.arrival_date = $("[data-arr]", f).value || null;
+  v.memo = $("[data-memo]", f).value.trim() || null;
+  return { fields: v, items: ctx.r._hasInv ? readItems(f) : [] };
+}
+function markDiffs(f) {
+  f.querySelectorAll("table.items tbody tr").forEach(tr => {
+    const q = toNum($('[data-c="quantity"]', tr).value), rq = $('[data-c="received_qty"]', tr);
+    const v = toNum(rq.value);
+    rq.classList.toggle("diff", v != null && q != null && Math.abs(v - q) > 0.001);
+  });
+}
+function detailAlerts(ctx, docNotes) {
+  const { fields, items } = collectDetail(ctx);
+  const s = { ...ctx.r, ...fields };
+  const w = crossCheck(s, items, ctx.r._hasWb, ctx.r._hasInv);
+  const infos = [];
+  if (!ctx.r._hasWb) infos.push("運送状がまだ登録されていません");
+  if (!ctx.r._hasInv) infos.push("インボイスがまだ登録されていません");
+  if (s.arrival_date && items.some(i => i.received_qty == null)) infos.push("届いた数量が未入力の明細があります");
+  markDiffs(ctx.f);
+  $("#dAlerts").innerHTML =
+    w.map(t => `<div class="alert warn">⚠ ${esc(t)}</div>`).join("") +
+    docNotes.map(n => `<div class="alert ${n.c}">${esc(n.t)}</div>`).join("") +
+    infos.map(t => `<div class="alert info">${esc(t)}</div>`).join("") +
+    (!w.length && !docNotes.some(n => n.c === "warn") ? `<div class="alert ok">✓ 照合チェックに問題はありません</div>` : "");
+  ctx.warns = [...w, ...docNotes.filter(n => n.c === "warn").map(n => n.t)];
+}
+
+async function saveDetail(ctx, btn, mode) {
+  const { fields, items } = collectDetail(ctx);
+  const r = ctx.r;
+  if (r._hasInv && !items.length) { alert("明細が1行もありません"); return; }
+  if (items.some(i => !i.description)) { alert("商品名が空の明細があります"); return; }
+  if (mode === "confirm") {
+    if (!fields.arrival_date) { alert("確認済にするには、到着日を入れてください"); return; }
+    if (r._hasInv && items.some(i => i.received_qty == null)) { alert("確認済にするには、すべての明細に「届いた数量」を入れてください"); return; }
+    if (!r._hasWb || !r._hasInv) { if (!confirm("書類がそろっていませんが、確認済にしますか？")) return; }
+    if (ctx.warns?.length && !confirm("警告がありますが、確認済にしますか？\n\n・" + ctx.warns.join("\n・"))) return;
+    fields.confirmed_at = new Date().toISOString();
+    fields.confirmed_by = (await sb.auth.getUser()).data.user?.id ?? null;
+  }
+  if (mode === "unconfirm") { fields.confirmed_at = null; fields.confirmed_by = null; }
+  fields.updated_at = new Date().toISOString();
+
+  btn.disabled = true; const label = btn.textContent; btn.innerHTML = '<span class="spinner"></span>保存中…';
+  try {
+    const { error } = await sb.from("shipments").update(fields).eq("id", r.id);
+    if (error) throw error;
+    if (r._hasInv) {
+      const old = r.shipment_items.map(({ id, ...rest }) => rest);
+      const del = await sb.from("shipment_items").delete().eq("shipment_id", r.id);
+      if (del.error) throw del.error;
+      const ins = await sb.from("shipment_items").insert(items.map(i => ({ ...i, shipment_id: r.id })));
+      if (ins.error) { if (old.length) await sb.from("shipment_items").insert(old); throw ins.error; }
+    }
+    await loadLedger();
+    openDetail(r.id);
+  } catch (e) {
+    alert("保存に失敗しました：" + (e.message || e));
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+async function openPdf(d) {
+  if (!d?.pdf_path) return;
+  const w = window.open("", "_blank");
+  const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(d.pdf_path, 600);
+  if (error) { w.close(); alert("PDFを開けませんでした"); return; }
+  w.location = data.signedUrl;
+}
+
+async function deleteDoc(r, type) {
+  const d = r.shipment_docs.find(x => x.doc_type === type); if (!d) return;
+  const last = r.shipment_docs.length === 1;
+  const msg = type === "invoice"
+    ? "インボイスを削除します。読み取った明細と、届いた数量の記録も消えます。よろしいですか？"
+    : "運送状を削除します。運送状から読み取った項目も消えます。よろしいですか？";
+  if (!confirm(msg + (last ? "\n（書類がなくなるため、荷物ごと削除されます）" : ""))) return;
+  try {
+    if (last) { await removeShipment(r); closeModal(); loadLedger(); return; }
+    const del = await sb.from("shipment_docs").delete().eq("id", d.id);
+    if (del.error) throw del.error;
+    if (d.pdf_path) await sb.storage.from(BUCKET).remove([d.pdf_path]);
+    const clear = {}; (type === "invoice" ? INV_FIELDS : WB_FIELDS).forEach(f => { if (f.k !== "carrier") clear[f.k] = null; });
+    if (type === "invoice") await sb.from("shipment_items").delete().eq("shipment_id", r.id);
+    await sb.from("shipments").update({ ...clear, confirmed_at: null, confirmed_by: null, updated_at: new Date().toISOString() }).eq("id", r.id);
+    await loadLedger(); openDetail(r.id);
+  } catch (e) { alert("削除に失敗しました：" + (e.message || e)); }
+}
+async function removeShipment(r) {
+  const paths = r.shipment_docs.map(d => d.pdf_path).filter(Boolean);
+  const { error } = await sb.from("shipments").delete().eq("id", r.id);
+  if (error) throw error;
+  if (paths.length) await sb.storage.from(BUCKET).remove(paths);
+}
+async function deleteShipment(r) {
+  if (!confirm(`AWB ${r.awb_no} の荷物を、書類・明細・到着記録ごと削除します。元に戻せません。よろしいですか？`)) return;
+  try { await removeShipment(r); closeModal(); loadLedger(); }
+  catch (e) { alert("削除に失敗しました：" + (e.message || e)); }
+}
+function closeModal() { $("#modal").classList.add("hidden"); }
+$("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
+
+// ---------- CSV出力（明細1行＝1行） ----------
+$("#csvBtn").onclick = () => {
+  const head = ["状態","AWB番号","運送会社","発送日","発送元","送り先","参照番号","運送状重量kg","運送状内容",
+    "インボイス番号","インボイス日付","通貨","合計金額","取引条件","総重量kg","到着日",
+    "行","商品名","HSコード","数量","単位","単価","小計","1個重量kg","原産","届いた数量","確認メモ","警告","メモ"];
+  const lines = [head];
+  filtered().forEach(r => (r.shipment_items.length ? r.shipment_items : [{}]).forEach(i => lines.push([
+    r._status, r.awb_no, r.carrier, r.wb_ship_date, r.wb_shipper || r.inv_shipper, r.wb_consignee || r.inv_consignee,
+    r.wb_ref_no, r.wb_weight, r.wb_content, r.inv_no, r.inv_date, r.currency, r.total_amount, r.incoterm, r.gross_weight, r.arrival_date,
+    i.line_no, i.description, i.hs_code, i.quantity, i.unit, i.unit_price, i.subtotal, i.unit_weight, i.origin, i.received_qty, i.check_note,
+    r._warns.join(" / "), r.memo])));
+  const csv = lines.map(l => l.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" }));
+  a.download = `運送状台帳_${new Date().toLocaleDateString("sv-SE")}.csv`;
+  a.click();
+};
+
+boot();
+</script>
+</body>
+</html>

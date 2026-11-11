@@ -1,0 +1,33 @@
+# 運送状台帳　設置手順
+
+INVOICE台帳と**同じSupabaseプロジェクト（INVOICE DAICHO）**を使います。新しい表を追加するだけなので、INVOICE台帳には影響しません。ログインも同じアカウントで使えます。
+
+## ① データベース
+1. Supabase（INVOICE DAICHO）の「SQL Editor」→「New query」
+2. `schema.sql` の中身を全部貼り付けて「Run」
+
+## ② 読み取り機能
+1. 「Edge Functions」→「Deploy a new function」→「Via Editor」
+2. コードを全部消して、`read-shipping-doc/index.ts` の中身を貼り付け
+3. **「Deploy」を押す前に**、右下の Function name を `read-shipping-doc` に書き換える（あとから変更できません）
+4. 「Deploy function」を押す
+5. APIキー（ANTHROPIC_API_KEY）は登録済みのものがそのまま使われるので、追加の作業はありません
+
+> 名前を変え忘れた場合は、`index.html` 上部の `const FN_NAME = "read-shipping-doc";` を、付いた名前に書き換えてください。
+
+## ③ 画面の公開
+1. GitHub で新しいリポジトリ `unsojo-daicho` を作成（INVOICE台帳と同じ Pattosystem の中）
+2. `index.html` をアップロード（接続情報は書き込み済みなので、編集は不要です）
+3. 「Settings」→「Pages」で Branch を `main`、`/ (root)` にして「Save」
+4. `https://pattosystem.github.io/unsojo-daicho/` を開き、INVOICE台帳と同じアカウントでログイン
+
+## 使い方
+- **取込**：運送状・インボイスのPDFを入れる。どちらか片方だけでもOK。AWB番号が同じものは1件の荷物にまとまります
+- **荷物一覧**：状態は「書類待ち → 未着 → 到着・確認中 → 確認済」。行をクリックすると詳細
+- **詳細**：到着日と、明細ごとの「届いた数量」を入れて「保存」。全部そろったら「確認済にする」。読み取った項目もここで直せます
+
+## 自動で警告すること
+- 運送状とインボイスで、参照番号・発送元・重量・商品名が食い違う
+- インボイスの、数量×単価≠小計、小計の合計≠合計金額、数量の合計≠合計数量、1個重量×数量≠総重量
+- PDFに印刷されている商品名と、PDF内部の文字データが違う
+- 届いた数量がインボイスの数量と違う
