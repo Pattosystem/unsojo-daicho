@@ -196,7 +196,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // 読み取り機能（Edge Function）の名前。Supabaseで付けた名前と同じにしてください
 const FN_NAME = "read-shipping-doc";
 // 出荷依頼シートを読み込む機能（Edge Function）の名前
-const SHEET_FN = "fetch-shipping-request";
+const SHEET_FN = "dynamic-worker";
 // =========================================================
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
