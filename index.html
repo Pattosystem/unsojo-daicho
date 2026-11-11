@@ -195,6 +195,8 @@ const SUPABASE_URL = "https://dunfssyisxywxfcblgdg.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR1bmZzc3lpc3h5d3hmY2JsZ2RnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwNjYwODEsImV4cCI6MjEwODY0MjA4MX0.pWqKvj7sLg9z3rjSGKqPPl7YLi-FFKDcuoFlDCLkZck";
 // 読み取り機能（Edge Function）の名前。Supabaseで付けた名前と同じにしてください
 const FN_NAME = "read-shipping-doc";
+// 出荷依頼シートを読み込む機能（Edge Function）の名前
+const SHEET_FN = "fetch-shipping-request";
 // =========================================================
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -293,7 +295,7 @@ function addItemRow(tbody, it, withRecv) {
 }
 function readItems(el) {
   const numC = new Set([...ITEM_COLS, ...RECV_COLS].filter(c => c.num).map(c => c.c));
-  return [...el.querySelectorAll("table.items tbody tr")].map((tr, idx) => {
+  return [...el.querySelectorAll("table.items:not(.contents) tbody tr")].map((tr, idx) => {
     const r = { line_no: idx + 1 };
     tr.querySelectorAll("[data-c]").forEach(i => {
       const raw = i.value.trim();
@@ -301,6 +303,42 @@ function readItems(el) {
     });
     return r;
   }).filter(r => r.description || r.quantity != null || r.subtotal != null);
+}
+
+// ---------- 実際の中身（出荷依頼シート）の表 ----------
+const CONT_COLS = [
+  { c: "product",       label: "商品名", w: "26%" },
+  { c: "requested_qty", label: "依頼数", num: 1, w: "8%" },
+  { c: "received_qty",  label: "届いた数量", num: 1, w: "9%" },
+  { c: "lot_no",        label: "ロット番号", w: "12%" },
+  { c: "expiry_date",   label: "使用期限", date: 1, w: "13%" },
+  { c: "note",          label: "メモ" },
+  { c: "source",        label: "取得元", w: "11%" },
+];
+function contentsTableHtml() {
+  return `<div class="itemswrap"><table class="items contents"><thead><tr>${CONT_COLS.map(c => `<th style="${c.w ? "width:" + c.w : ""}">${c.label}</th>`).join("")}<th></th></tr></thead><tbody></tbody></table></div>
+    <button class="btn small" data-act="addcont" style="margin-top:6px">＋ 行を追加</button>`;
+}
+function addContentRow(tbody, it) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = CONT_COLS.map(c => `<td><input data-cc="${c.c}" type="${c.date ? "date" : "text"}" class="${c.num ? "num" : ""}" value="${esc(c.num ? fmtN(it[c.c]) : (it[c.c] ?? ""))}"></td>`).join("")
+    + `<td><button class="x" title="この行を削除">×</button></td>`;
+  $(".x", tr).onclick = () => { const host = tr.closest("[data-host]"); tr.remove(); host && host.dispatchEvent(new Event("change", { bubbles: true })); };
+  tbody.appendChild(tr);
+}
+function readContents(el) {
+  return [...el.querySelectorAll("table.items.contents tbody tr")].map((tr, idx) => {
+    const r = { line_no: idx + 1 };
+    tr.querySelectorAll("[data-cc]").forEach(i => {
+      const raw = i.value.trim(), col = CONT_COLS.find(c => c.c === i.dataset.cc);
+      r[i.dataset.cc] = col.num ? toNum(raw) : (raw || null);
+    });
+    return r;
+  }).filter(r => r.product || r.requested_qty != null || r.received_qty != null);
+}
+function contentsCheck(list) {
+  return list.filter(c => c.received_qty != null && c.requested_qty != null && Math.abs(c.received_qty - c.requested_qty) > 0.001)
+    .map(c => `実際の中身「${c.product}」：依頼数 ${fmtN(c.requested_qty)} に対し、届いた数量 ${fmtN(c.received_qty)}`);
 }
 
 // ---------- 照合チェック（書類どうし・インボイス内・到着数量） ----------
@@ -634,14 +672,15 @@ async function saveImport(ctx, btn) {
 // ---------- 荷物一覧 ----------
 let LEDGER = [];
 async function loadLedger() {
-  const { data, error } = await sb.from("shipments").select("*, shipment_docs(*), shipment_items(*)").order("created_at", { ascending: false });
+  const { data, error } = await sb.from("shipments").select("*, shipment_docs(*), shipment_items(*), shipment_contents(*)").order("created_at", { ascending: false });
   if (error) { alert("読み込みに失敗しました：" + error.message); return; }
   LEDGER = data.map(r => {
     r.shipment_items = (r.shipment_items || []).sort((a, b) => a.line_no - b.line_no);
+    r.shipment_contents = (r.shipment_contents || []).sort((a, b) => a.line_no - b.line_no);
     const types = r.shipment_docs.map(d => d.doc_type);
     r._hasWb = types.includes("waybill"); r._hasInv = types.includes("invoice");
     r._status = statusOf(r);
-    r._warns = [...crossCheck(r, r.shipment_items, r._hasWb, r._hasInv),
+    r._warns = [...crossCheck(r, r.shipment_items, r._hasWb, r._hasInv), ...contentsCheck(r.shipment_contents),
                 ...r.shipment_docs.flatMap(d => d.warning_note ? d.warning_note.split("\n") : [])];
     r._date = r.wb_ship_date || r.inv_date || "";
     return r;
@@ -655,7 +694,7 @@ function filtered() {
   return LEDGER.filter(r =>
     (!st || r._status === st) && (!m || r._date.startsWith(m)) && (!onlyW || r._warns.length) &&
     (!q || normA([r.awb_no, r.carrier, r.wb_shipper, r.inv_shipper, r.inv_no, r.wb_ref_no, r.wb_content, r.memo,
-                   ...r.shipment_items.map(i => i.description)].join(" ")).includes(q)));
+                   ...r.shipment_items.map(i => i.description), ...r.shipment_contents.map(c => c.product)].join(" ")).includes(q)));
 }
 
 function drawLedger() {
@@ -664,14 +703,16 @@ function drawLedger() {
   $("#ledgerEmpty").classList.toggle("hidden", rows.length > 0);
   $("#ledgerBody").innerHTML = rows.map(r => {
     const its = r.shipment_items;
-    const name = its[0] ? its[0].description + (its.length > 1 ? ` 他${its.length - 1}件` : "") : (r.wb_content || "");
+    const cs = r.shipment_contents;
+    const name = cs[0] ? cs[0].product + (cs.length > 1 ? ` 他${cs.length - 1}件` : "")
+      : its[0] ? its[0].description + (its.length > 1 ? ` 他${its.length - 1}件` : "") : (r.wb_content || "");
     return `<tr data-id="${r.id}">
       <td class="mono">${esc(r._date)}</td>
       <td class="mono">${esc(r.awb_no)}</td>
       <td>${esc(r.carrier ?? "")}</td>
       <td>${esc(r.wb_shipper || r.inv_shipper || "")}</td>
       <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(name)}</td>
-      <td><span class="doc ${r._hasWb ? "have" : "miss"}">運送状</span><span class="doc ${r._hasInv ? "have" : "miss"}">インボイス</span></td>
+      <td><span class="doc ${r._hasWb ? "have" : "miss"}">運送状</span><span class="doc ${r._hasInv ? "have" : "miss"}">インボイス</span><span class="doc ${cs.length ? "have" : "miss"}">中身</span></td>
       <td class="mono" style="text-align:right">${r.total_amount != null ? fmt(r.total_amount) + " " + esc(r.currency ?? "") : ""}</td>
       <td class="mono">${esc(r.arrival_date ?? "")}</td>
       <td><span class="tag ${STATUS_CLS[r._status]}">${r._status}</span></td>
@@ -705,6 +746,14 @@ function openDetail(id) {
       ${r._hasWb ? `<div class="sec"><h4>運送状</h4><div class="grid">${fieldsHtml(WB_FIELDS, r)}</div></div>` : ""}
       ${r._hasInv ? `<div class="sec"><h4>インボイス</h4><div class="grid">${fieldsHtml(INV_FIELDS.concat(r._hasWb ? [] : [{ k: "carrier", label: "運送会社" }]), r)}</div></div>
         <div class="sec"><h4>明細と到着時の確認</h4>${itemsTableHtml(true)}</div>` : ""}
+      <div class="sec"><h4>実際の中身（出荷依頼シート）</h4>
+        <div class="actions" style="justify-content:flex-start;margin:0 0 8px">
+          <button class="btn small" data-act="loadsheet">シートから読み込む</button>
+          <button class="btn small" data-act="fillcont">届いた数量に依頼数を入れる</button>
+        </div>
+        <div id="sheetPick"></div>
+        ${contentsTableHtml()}
+      </div>
       <div class="sec"><h4>到着</h4>
         <div class="grid">
           <div class="f"><label>到着日</label><div class="inline"><input data-arr type="date" value="${esc(r.arrival_date ?? "")}"><button class="btn small" data-act="today">今日</button></div></div>
@@ -725,19 +774,31 @@ function openDetail(id) {
 
   const f = $("#dForm");
   if (r._hasInv) {
-    const tbody = $("tbody", f);
+    const tbody = $("table.items:not(.contents) tbody", f);
     (r.shipment_items.length ? r.shipment_items : [{}]).forEach(it => addItemRow(tbody, it, true));
   }
+  r.shipment_contents.forEach(c => addContentRow($("table.items.contents tbody", f), c));
   const ctx = { r, f };
   const refresh = () => detailAlerts(ctx, docNotes);
   f.addEventListener("change", refresh);
   f.addEventListener("input", (e) => { if (e.target.matches("table.items input")) markDiffs(f); });
+  ctx.refresh = refresh;
   f.onclick = (e) => {
     const act = e.target.dataset.act;
-    if (act === "addrow") { addItemRow($("tbody", f), {}, true); }
+    if (act === "addrow") { addItemRow($("table.items:not(.contents) tbody", f), {}, true); }
+    if (act === "addcont") { addContentRow($("table.items.contents tbody", f), {}); }
+    if (act === "loadsheet") loadFromSheet(ctx, e.target);
+    if (act === "fillcont") {
+      f.querySelectorAll("table.items.contents tbody tr").forEach(tr => {
+        const rq = $('[data-cc="received_qty"]', tr);
+        if (!rq.value) rq.value = $('[data-cc="requested_qty"]', tr).value;
+      });
+      refresh();
+    }
+    if (e.target.dataset.pick != null) applySheetResult(ctx, ctx.sheetResults[Number(e.target.dataset.pick)]);
     if (act === "today") { $("[data-arr]", f).value = new Date().toLocaleDateString("sv-SE"); refresh(); }
     if (act === "fillqty") {
-      f.querySelectorAll("table.items tbody tr").forEach(tr => {
+      f.querySelectorAll("table.items:not(.contents) tbody tr").forEach(tr => {
         const rq = $('[data-c="received_qty"]', tr);
         if (!rq.value) rq.value = $('[data-c="quantity"]', tr).value;
       });
@@ -759,23 +820,30 @@ function collectDetail(ctx) {
   f.querySelectorAll(".grid").forEach(g => Object.assign(v, readFields(g)));
   v.arrival_date = $("[data-arr]", f).value || null;
   v.memo = $("[data-memo]", f).value.trim() || null;
-  return { fields: v, items: ctx.r._hasInv ? readItems(f) : [] };
+  return { fields: v, items: ctx.r._hasInv ? readItems(f) : [], contents: readContents(f) };
 }
 function markDiffs(f) {
-  f.querySelectorAll("table.items tbody tr").forEach(tr => {
+  f.querySelectorAll("table.items.contents tbody tr").forEach(tr => {
+    const q = toNum($('[data-cc="requested_qty"]', tr).value), rq = $('[data-cc="received_qty"]', tr);
+    const v = toNum(rq.value);
+    rq.classList.toggle("diff", v != null && q != null && Math.abs(v - q) > 0.001);
+  });
+  f.querySelectorAll("table.items:not(.contents) tbody tr").forEach(tr => {
     const q = toNum($('[data-c="quantity"]', tr).value), rq = $('[data-c="received_qty"]', tr);
     const v = toNum(rq.value);
     rq.classList.toggle("diff", v != null && q != null && Math.abs(v - q) > 0.001);
   });
 }
 function detailAlerts(ctx, docNotes) {
-  const { fields, items } = collectDetail(ctx);
+  const { fields, items, contents } = collectDetail(ctx);
   const s = { ...ctx.r, ...fields };
-  const w = crossCheck(s, items, ctx.r._hasWb, ctx.r._hasInv);
+  const w = [...crossCheck(s, items, ctx.r._hasWb, ctx.r._hasInv), ...contentsCheck(contents)];
   const infos = [];
+  if (s.arrival_date && !contents.length) infos.push("実際の中身がまだ記録されていません（「シートから読み込む」で取り込めます）");
+  if (s.arrival_date && contents.some(c => c.received_qty == null)) infos.push("実際の中身に、届いた数量が未入力の行があります");
   if (!ctx.r._hasWb) infos.push("運送状がまだ登録されていません");
   if (!ctx.r._hasInv) infos.push("インボイスがまだ登録されていません");
-  if (s.arrival_date && items.some(i => i.received_qty == null)) infos.push("届いた数量が未入力の明細があります");
+  if (s.arrival_date && !contents.length && items.some(i => i.received_qty == null)) infos.push("届いた数量が未入力の明細があります");
   markDiffs(ctx.f);
   $("#dAlerts").innerHTML =
     w.map(t => `<div class="alert warn">⚠ ${esc(t)}</div>`).join("") +
@@ -786,13 +854,16 @@ function detailAlerts(ctx, docNotes) {
 }
 
 async function saveDetail(ctx, btn, mode) {
-  const { fields, items } = collectDetail(ctx);
+  const { fields, items, contents } = collectDetail(ctx);
   const r = ctx.r;
+  if (contents.some(c => !c.product)) { alert("実際の中身に、商品名が空の行があります"); return; }
   if (r._hasInv && !items.length) { alert("明細が1行もありません"); return; }
   if (items.some(i => !i.description)) { alert("商品名が空の明細があります"); return; }
   if (mode === "confirm") {
     if (!fields.arrival_date) { alert("確認済にするには、到着日を入れてください"); return; }
-    if (r._hasInv && items.some(i => i.received_qty == null)) { alert("確認済にするには、すべての明細に「届いた数量」を入れてください"); return; }
+    if (contents.length) {
+      if (contents.some(c => c.received_qty == null)) { alert("確認済にするには、実際の中身のすべての行に「届いた数量」を入れてください"); return; }
+    } else if (r._hasInv && items.some(i => i.received_qty == null)) { alert("確認済にするには、すべての明細に「届いた数量」を入れてください"); return; }
     if (!r._hasWb || !r._hasInv) { if (!confirm("書類がそろっていませんが、確認済にしますか？")) return; }
     if (ctx.warns?.length && !confirm("警告がありますが、確認済にしますか？\n\n・" + ctx.warns.join("\n・"))) return;
     fields.confirmed_at = new Date().toISOString();
@@ -812,12 +883,57 @@ async function saveDetail(ctx, btn, mode) {
       const ins = await sb.from("shipment_items").insert(items.map(i => ({ ...i, shipment_id: r.id })));
       if (ins.error) { if (old.length) await sb.from("shipment_items").insert(old); throw ins.error; }
     }
+    {
+      const old = r.shipment_contents.map(({ id, ...rest }) => rest);
+      const del = await sb.from("shipment_contents").delete().eq("shipment_id", r.id);
+      if (del.error) throw del.error;
+      if (contents.length) {
+        const ins = await sb.from("shipment_contents").insert(contents.map(c => ({ ...c, shipment_id: r.id })));
+        if (ins.error) { if (old.length) await sb.from("shipment_contents").insert(old); throw ins.error; }
+      }
+    }
     await loadLedger();
     openDetail(r.id);
   } catch (e) {
     alert("保存に失敗しました：" + (e.message || e));
     btn.disabled = false; btn.textContent = label;
   }
+}
+
+// ---------- 出荷依頼シートから読み込む ----------
+async function loadFromSheet(ctx, btn) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>シートを検索中…';
+  try {
+    const { data, error } = await sb.functions.invoke(SHEET_FN, { body: { awb: ctx.r.awb_no } });
+    if (error) {
+      let detail = error.message;
+      try { const b = await error.context.json(); detail = `(${error.context.status}) ` + (b.error || b.msg || b.message || JSON.stringify(b)); }
+      catch (_) { try { detail = `(${error.context.status}) ` + await error.context.text(); } catch (_) {} }
+      throw new Error(detail);
+    }
+    const results = data?.results || [];
+    if (!results.length) { alert(`出荷依頼シートに AWB ${ctx.r.awb_no} が見つかりませんでした。\nシートの「Tracking Number」欄に番号が入っているか確認してください。`); return; }
+    if (results.length === 1) { applySheetResult(ctx, results[0]); return; }
+    ctx.sheetResults = results;
+    $("#sheetPick").innerHTML = `<div class="alert info">シート内に ${results.length} か所見つかりました。取り込むものを選んでください：</div>
+      <div class="actions" style="justify-content:flex-start;margin:6px 0 10px">${results.map((x, i) =>
+        `<button class="btn small" data-pick="${i}">タブ「${esc(x.sheet)}」${esc(x.block || "")}（${x.items.length}品目）</button>`).join("")}</div>`;
+  } catch (e) {
+    alert("シートの読み込みに失敗しました：" + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+function applySheetResult(ctx, x) {
+  if (!x) return;
+  const tbody = $("table.items.contents tbody", ctx.f);
+  if (readContents(ctx.f).length && !confirm("今入っている「実際の中身」を、シートの内容に置き換えます。よろしいですか？")) return;
+  tbody.innerHTML = "";
+  const src = `${x.sheet} ${x.block || ""}`.trim();
+  x.items.filter(it => it.qty !== 0).forEach(it => addContentRow(tbody, { product: it.product, requested_qty: it.qty, source: src }));
+  $("#sheetPick").innerHTML = `<div class="alert info">タブ「${esc(x.sheet)}」${esc(x.block || "")} から ${tbody.children.length} 品目を読み込みました（数量0の行は除いています）。届いた数量を入れて「保存」してください。</div>`;
+  ctx.refresh();
 }
 
 async function openPdf(d) {
@@ -862,15 +978,20 @@ $("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeM
 
 // ---------- CSV出力（明細1行＝1行） ----------
 $("#csvBtn").onclick = () => {
-  const head = ["状態","AWB番号","運送会社","発送日","発送元","送り先","参照番号","運送状重量kg","運送状内容",
+  const head = ["区分","状態","AWB番号","運送会社","発送日","発送元","送り先","参照番号","運送状重量kg","運送状内容",
     "インボイス番号","インボイス日付","通貨","合計金額","取引条件","総重量kg","到着日",
-    "行","商品名","HSコード","数量","単位","単価","小計","1個重量kg","原産","届いた数量","確認メモ","警告","メモ"];
+    "行","商品名","HSコード","数量（依頼数）","単位","単価","小計","1個重量kg","原産","届いた数量","確認メモ","ロット番号","使用期限","取得元","警告","メモ"];
   const lines = [head];
-  filtered().forEach(r => (r.shipment_items.length ? r.shipment_items : [{}]).forEach(i => lines.push([
+  const base = (r) => [r._status, r.awb_no, r.carrier, r.wb_ship_date, r.wb_shipper || r.inv_shipper, r.wb_consignee || r.inv_consignee,
+    r.wb_ref_no, r.wb_weight, r.wb_content, r.inv_no, r.inv_date, r.currency, r.total_amount, r.incoterm, r.gross_weight, r.arrival_date];
+  filtered().forEach(r => r.shipment_contents.forEach(c => lines.push(["実際の中身", ...base(r),
+    c.line_no, c.product, "", c.requested_qty, "", "", "", "", "", c.received_qty, c.note, c.lot_no, c.expiry_date, c.source,
+    r._warns.join(" / "), r.memo])));
+  filtered().forEach(r => (r.shipment_items.length ? r.shipment_items : [{}]).forEach(i => lines.push(["インボイス明細",
     r._status, r.awb_no, r.carrier, r.wb_ship_date, r.wb_shipper || r.inv_shipper, r.wb_consignee || r.inv_consignee,
     r.wb_ref_no, r.wb_weight, r.wb_content, r.inv_no, r.inv_date, r.currency, r.total_amount, r.incoterm, r.gross_weight, r.arrival_date,
     i.line_no, i.description, i.hs_code, i.quantity, i.unit, i.unit_price, i.subtotal, i.unit_weight, i.origin, i.received_qty, i.check_note,
-    r._warns.join(" / "), r.memo])));
+    "", "", "", r._warns.join(" / "), r.memo])));
   const csv = lines.map(l => l.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" }));
