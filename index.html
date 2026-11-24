@@ -216,7 +216,7 @@ table.ledger tr.recon-unmatched td:first-child{box-shadow:inset 4px 0 #8a929b}
       <div class="recon-upload">
         <div class="copy">
           <h3>DAESUNG月次Excelを取り込む</h3>
-          <p>最新年のシートから、マイナス数量を「出庫」として読み取ります。過去データは重複登録せず、同じ列の内容を更新します。</p>
+          <p>Excelの出庫商品・数量と「実際の中身（出荷依頼シート）」の依頼商品・依頼数を照合します。日付は候補を絞る補助情報として扱い、複数AWBに分かれた出荷も合算します。</p>
           <div class="recon-meta" id="daesungMeta">まだExcelが取り込まれていません</div>
         </div>
         <button class="btn primary" id="daesungPickBtn">Excelを選ぶ</button>
@@ -242,7 +242,7 @@ table.ledger tr.recon-unmatched td:first-child{box-shadow:inset 4px 0 #8a929b}
       <div class="tablewrap">
         <table class="ledger">
           <thead><tr>
-            <th>Excel出庫日</th><th>運送状発送日</th><th>AWB番号</th><th>Excel出庫内容</th><th>運送状明細</th><th>判定</th><th>差異・確認事項</th>
+            <th>Excel出庫日</th><th>台帳日付（参考）</th><th>AWB番号</th><th>Excel出庫内容</th><th>出荷依頼内容</th><th>到着確認</th><th>判定</th><th>差異・確認事項</th>
           </tr></thead>
           <tbody id="reconBody"></tbody>
         </table>
@@ -815,13 +815,39 @@ function isDaesung(r) {
   const n = normA(`${r.wb_shipper ?? ""} ${r.inv_shipper ?? ""}`);
   return n.includes("DAESUNG") || n.includes("YONSUPARK");
 }
-function shipmentLines(r) {
-  return (r.shipment_items || []).filter(x => x.description).map(x => ({ product:x.description, quantity:x.quantity, line_no:x.line_no }));
+const DAESUNG_DATE_WINDOW_DAYS = 21;
+const DAESUNG_MAX_GROUP_SIZE = 4;
+const DAESUNG_MAX_NEAR_SHIPMENTS = 9;
+
+// DAESUNG照合の基準はインボイス明細ではなく、弊社が登録した出荷依頼の内容。
+function requestLines(r) {
+  return (r.shipment_contents || []).filter(x => x.product && x.requested_qty != null && Number.isFinite(Number(x.requested_qty)) && Math.abs(Number(x.requested_qty)) > .001)
+    .map(x => ({ product:x.product, quantity:Math.abs(Number(x.requested_qty)), received_qty:x.received_qty, line_no:x.line_no, shipment_id:r.id }));
 }
-function compareDaesung(batch, shipment) {
-  const excelItems = batch.items || [], shipItems = shipmentLines(shipment);
+function aggregateRequestLines(shipments) {
+  const out=[];
+  shipments.flatMap(requestLines).forEach(line => {
+    const key=productNorm(line.product);
+    const hit=out.find(x=>productNorm(x.product)===key);
+    if (hit) {
+      hit.quantity += line.quantity;
+      hit.shipment_ids.push(line.shipment_id);
+    } else out.push({product:line.product,quantity:line.quantity,shipment_ids:[line.shipment_id]});
+  });
+  return out;
+}
+function arrivalCheck(shipments) {
+  const rows=shipments.flatMap(s=>(s.shipment_contents||[]).filter(x=>x.product && x.requested_qty!=null));
+  if (!rows.length) return {status:"unmatched",issues:["出荷依頼シートが未取込です"]};
+  const filled=rows.filter(x=>x.received_qty!=null && Number.isFinite(Number(x.received_qty)));
+  if (filled.length<rows.length) return {status:"review",issues:["到着数量は未確認です"]};
+  const diffs=rows.filter(x=>Math.abs(Number(x.requested_qty)-Number(x.received_qty))>.001)
+    .map(x=>`${x.product}：依頼 ${fmtN(x.requested_qty)} / 到着 ${fmtN(x.received_qty)}`);
+  return diffs.length ? {status:"mismatch",issues:diffs.map(x=>`到着数量不一致 ${x}`)} : {status:"exact",issues:["到着数量も依頼数と一致しています"]};
+}
+function compareItemSets(excelItems, requestItems) {
   const possible = [];
-  excelItems.forEach((e, ei) => shipItems.forEach((s, si) => {
+  excelItems.forEach((e, ei) => requestItems.forEach((s, si) => {
     const nameScore = diceScore(e.product, s.product);
     if (nameScore >= .48) possible.push({ei,si,nameScore});
   }));
@@ -830,57 +856,97 @@ function compareDaesung(batch, shipment) {
   possible.forEach(p=>{ if (!usedE.has(p.ei) && !usedS.has(p.si)) { usedE.add(p.ei); usedS.add(p.si); pairs.push(p); } });
   const issues=[], qtyExact=[];
   pairs.forEach(p=>{
-    const e=excelItems[p.ei], s=shipItems[p.si];
+    const e=excelItems[p.ei], s=requestItems[p.si];
     const same = e.quantity != null && s.quantity != null && Math.abs(Number(e.quantity)-Number(s.quantity)) <= .001;
     if (same) qtyExact.push(p);
-    else issues.push(`${e.product}：Excel ${fmtN(e.quantity)} / 運送状 ${s.quantity == null ? "数量なし" : fmtN(s.quantity)}`);
+    else issues.push(`${e.product}：Excel ${fmtN(e.quantity)} / 出荷依頼 ${s.quantity == null ? "数量なし" : fmtN(s.quantity)}`);
   });
   excelItems.forEach((e,i)=>{ if (!usedE.has(i)) issues.push(`Excelのみ：${e.product} × ${fmtN(e.quantity)}`); });
-  shipItems.forEach((s,i)=>{ if (!usedS.has(i)) issues.push(`運送状のみ：${s.product}${s.quantity == null ? "" : " × "+fmtN(s.quantity)}`); });
-  const denom = Math.max(excelItems.length, shipItems.length, 1);
-  const gap = dayGap(batch.outbound_date, shipment._date);
-  const score = (pairs.length/denom)*.55 + (qtyExact.length/denom)*.30 + Math.max(0,1-gap/10)*.15;
+  requestItems.forEach((s,i)=>{ if (!usedS.has(i)) issues.push(`出荷依頼のみ：${s.product}${s.quantity == null ? "" : " × "+fmtN(s.quantity)}`); });
+  const denom = Math.max(excelItems.length, requestItems.length, 1);
   return {
-    batch, shipment, excelItems, shipItems, issues, gap, score,
-    exact: !!excelItems.length && !!shipItems.length && !issues.length,
-    missingDetails: !shipItems.length,
+    excelItems, requestItems, issues,
+    contentScore:(pairs.length/denom)*.58+(qtyExact.length/denom)*.42,
+    exact:!!excelItems.length && !!requestItems.length && !issues.length,
   };
 }
+function compareDaesung(batch, group) {
+  const shipments=Array.isArray(group)?group:[group];
+  const excelItems=batch.items||[], requestItems=aggregateRequestLines(shipments);
+  const compared=compareItemSets(excelItems,requestItems);
+  const gaps=shipments.map(s=>dayGap(batch.outbound_date,s._date));
+  const gap=gaps.length?Math.max(...gaps):999;
+  const avgGap=gaps.length?gaps.reduce((a,b)=>a+b,0)/gaps.length:999;
+  const dateScore=Math.max(0,1-avgGap/DAESUNG_DATE_WINDOW_DAYS);
+  return {
+    batch,shipments,shipment:shipments[0]||null,excelItems,
+    shipItems:requestItems,requestItems,issues:compared.issues,gap,
+    score:compared.contentScore*.92+dateScore*.08-Math.max(0,shipments.length-1)*.002,
+    exact:compared.exact,missingDetails:!requestItems.length,
+    arrival:arrivalCheck(shipments),
+  };
+}
+function shipmentGroups(items,maxSize) {
+  const out=[];
+  function walk(start,picked) {
+    if (picked.length) out.push([...picked]);
+    if (picked.length>=maxSize) return;
+    for (let i=start;i<items.length;i++) { picked.push(items[i]); walk(i+1,picked); picked.pop(); }
+  }
+  walk(0,[]); return out;
+}
+function groupKey(c) { return (c.shipments||[]).map(x=>x.id).sort().join("|"); }
 function buildDaesungResults() {
-  const ships = LEDGER.filter(isDaesung), candidates=[];
-  DAESUNG_BATCHES.forEach(batch => ships.forEach(shipment => {
-    if (dayGap(batch.outbound_date, shipment._date) <= 10) candidates.push(compareDaesung(batch,shipment));
-  }));
-  candidates.sort((a,b)=>(Number(b.exact)-Number(a.exact)) || b.score-a.score || a.gap-b.gap);
+  const ships=LEDGER.filter(isDaesung), withRequests=ships.filter(s=>requestLines(s).length), candidates=[];
+  DAESUNG_BATCHES.forEach(batch=>{
+    const near=withRequests.filter(s=>dayGap(batch.outbound_date,s._date)<=DAESUNG_DATE_WINDOW_DAYS)
+      .sort((a,b)=>dayGap(batch.outbound_date,a._date)-dayGap(batch.outbound_date,b._date))
+      .slice(0,DAESUNG_MAX_NEAR_SHIPMENTS);
+    shipmentGroups(near,Math.min(DAESUNG_MAX_GROUP_SIZE,near.length)).forEach(group=>candidates.push(compareDaesung(batch,group)));
+  });
+  candidates.sort((a,b)=>(Number(b.exact)-Number(a.exact)) || b.score-a.score || a.shipments.length-b.shipments.length || a.gap-b.gap);
   const usedB=new Set(), usedS=new Set(), assigned=[];
   candidates.forEach(c=>{
-    if (c.score < .25 || usedB.has(c.batch.id) || usedS.has(c.shipment.id)) return;
-    usedB.add(c.batch.id); usedS.add(c.shipment.id); assigned.push(c);
+    if ((!c.exact&&c.score<.30)||usedB.has(c.batch.id)||c.shipments.some(s=>usedS.has(s.id))) return;
+    usedB.add(c.batch.id); c.shipments.forEach(s=>usedS.add(s.id)); assigned.push(c);
   });
   const results=[];
   DAESUNG_BATCHES.forEach(batch=>{
     const c=assigned.find(x=>x.batch.id===batch.id);
     if (!c) {
-      const near = candidates.filter(x=>x.batch.id===batch.id);
-      results.push({batch,shipment:null,status:near.some(x=>x.missingDetails)?"review":"unmatched",issues:[near.length?"近い日付の荷物はありますが、商品・数量で特定できません":"対応するDAESUNGの運送状が見つかりません"],excelItems:batch.items||[],shipItems:[]});
+      const near=candidates.filter(x=>x.batch.id===batch.id);
+      const missing=ships.filter(s=>dayGap(batch.outbound_date,s._date)<=DAESUNG_DATE_WINDOW_DAYS&&!requestLines(s).length);
+      const issue=near.length?"近い日付の出荷依頼はありますが、商品・数量で特定できません"
+        :missing.length?"近い日付のAWBがありますが、出荷依頼シートが未取込です":"対応する出荷依頼が見つかりません";
+      results.push({batch,shipments:[],shipment:null,status:near.length?"review":"unmatched",issues:[issue],excelItems:batch.items||[],shipItems:[],requestItems:[],arrival:{status:"unmatched",issues:[]}});
       return;
     }
-    const alternatives=candidates.filter(x=>x.batch.id===batch.id && x.shipment.id!==c.shipment.id && Math.abs(x.score-c.score)<=.05);
-    const status=c.exact?"exact":c.missingDetails||alternatives.length?"review":"mismatch";
-    const issues=c.exact?["商品名・数量が一致しています"]:c.missingDetails?["運送状台帳にインボイス商品明細がありません"]:alternatives.length?["候補が複数あります。AWBを確認してください",...c.issues]:c.issues;
+    const alternatives=candidates.filter(x=>x.batch.id===batch.id&&groupKey(x)!==groupKey(c)&&x.exact===c.exact&&Math.abs(x.score-c.score)<=.03);
+    let status=c.exact?"exact":alternatives.length?"review":"mismatch";
+    let issues=c.exact?[c.shipments.length>1?`出荷依頼 ${c.shipments.length}件の合計とDAESUNG報告の商品・数量が一致しています`:"出荷依頼とDAESUNG報告の商品・数量が一致しています"]
+      :alternatives.length?["候補が複数あります。AWBを確認してください",...c.issues]:[...c.issues];
+    if (c.arrival.status==="mismatch") { status="mismatch"; issues.push(...c.arrival.issues); }
+    else if (c.arrival.status==="exact") issues.push(...c.arrival.issues);
+    else if (c.arrival.status==="review") issues.push(...c.arrival.issues);
     results.push({...c,status,issues});
   });
-  ships.filter(s=>!usedS.has(s.id)).forEach(shipment=>results.push({
-    batch:null,shipment,status:"unmatched",issues:["Excelに対応する出庫記録がありません"],excelItems:[],shipItems:shipmentLines(shipment),
-  }));
-  DAESUNG_RESULTS=results.sort((a,b)=>String(b.batch?.outbound_date||b.shipment?._date||"").localeCompare(String(a.batch?.outbound_date||a.shipment?._date||"")));
-  LEDGER.forEach(r=>r._daesungRecon=DAESUNG_RESULTS.find(x=>x.shipment?.id===r.id)||null);
+  ships.filter(s=>!usedS.has(s.id)).forEach(shipment=>{
+    const req=requestLines(shipment), arrival=arrivalCheck([shipment]);
+    results.push({batch:null,shipments:[shipment],shipment,status:"unmatched",issues:[req.length?"Excelに対応する出庫記録がありません":"出荷依頼シートが未取込のため照合できません"],excelItems:[],shipItems:req,requestItems:req,arrival});
+  });
+  DAESUNG_RESULTS=results.sort((a,b)=>String(b.batch?.outbound_date||b.shipments?.[0]?._date||"").localeCompare(String(a.batch?.outbound_date||a.shipments?.[0]?._date||"")));
+  LEDGER.forEach(r=>r._daesungRecon=DAESUNG_RESULTS.find(x=>(x.shipments||[]).some(s=>s.id===r.id))||null);
 }
 const RECON_LABEL={exact:"完全一致",mismatch:"不一致",review:"要確認",unmatched:"未照合"};
+const ARRIVAL_LABEL={exact:"一致",mismatch:"不一致",review:"未確認",unmatched:"—"};
 function itemsSummary(items) {
   return items.length ? items.map(x=>`${x.product} × ${fmtN(x.quantity)}`).join(" / ") : "—";
 }
 function reconBadge(status) { return `<span class="match-badge ${status}">${RECON_LABEL[status]}</span>`; }
+function arrivalBadge(arrival) {
+  const status=arrival?.status||"unmatched";
+  return `<span class="match-badge ${status}">${ARRIVAL_LABEL[status]}</span>`;
+}
 
 async function loadDaesungData() {
   const [{data:batches,error},{data:imports}] = await Promise.all([
@@ -903,20 +969,26 @@ async function loadDaesungData() {
 }
 function drawDaesung() {
   const st=$("#reconFilter").value, month=$("#reconMonth").value;
-  const monthRows=DAESUNG_RESULTS.filter(x=>!month||String(x.batch?.outbound_date||x.shipment?._date||"").startsWith(month));
+  const monthRows=DAESUNG_RESULTS.filter(x=>!month||String(x.batch?.outbound_date||x.shipments?.[0]?._date||"").startsWith(month));
   const rows=monthRows.filter(x=>!st||x.status===st);
   const counts={exact:0,mismatch:0,review:0,unmatched:0}; monthRows.forEach(x=>counts[x.status]++);
   Object.entries({reconExact:"exact",reconMismatch:"mismatch",reconReview:"review",reconUnmatched:"unmatched"}).forEach(([id,k])=>$("#"+id).textContent=counts[k]);
   $("#reconCount").textContent=`${rows.length} 件`;
   $("#reconEmpty").classList.toggle("hidden",rows.length>0);
-  $("#reconBody").innerHTML=rows.map(x=>`<tr class="recon-${x.status}">
-    <td class="mono">${esc(x.batch?.outbound_date||"")}</td>
-    <td class="mono">${esc(x.shipment?._date||"")}</td>
-    <td>${x.shipment?`<button class="btn small mono" data-recon-open="${x.shipment.id}">${esc(x.shipment.awb_no)}</button>`:"—"}</td>
-    <td class="recon-items">${esc(itemsSummary(x.excelItems))}</td>
-    <td class="recon-items">${esc(itemsSummary(x.shipItems))}</td>
-    <td>${reconBadge(x.status)}</td>
-    <td class="recon-issues">${esc(x.issues.join(" / "))}</td></tr>`).join("");
+  $("#reconBody").innerHTML=rows.map(x=>{
+    const ships=x.shipments||[];
+    const dates=[...new Set(ships.map(s=>s._date).filter(Boolean))];
+    const awbs=ships.map(s=>`<button class="btn small mono" data-recon-open="${s.id}">${esc(s.awb_no)}</button>`).join(" ");
+    return `<tr class="recon-${x.status}">
+      <td class="mono">${esc(x.batch?.outbound_date||"")}</td>
+      <td class="mono">${dates.length?dates.map(esc).join("<br>"):"—"}</td>
+      <td>${awbs||"—"}</td>
+      <td class="recon-items">${esc(itemsSummary(x.excelItems))}</td>
+      <td class="recon-items">${esc(itemsSummary(x.shipItems))}</td>
+      <td>${arrivalBadge(x.arrival)}</td>
+      <td>${reconBadge(x.status)}</td>
+      <td class="recon-issues">${esc(x.issues.join(" / "))}</td></tr>`;
+  }).join("");
   document.querySelectorAll("[data-recon-open]").forEach(b=>b.onclick=()=>openDetail(b.dataset.reconOpen));
 }
 async function loadDaesungTab() {
@@ -938,7 +1010,7 @@ async function importDaesungFile(file, btn) {
     const payload=parsed.batches.map(b=>({...b,import_id:importId,updated_at:new Date().toISOString()}));
     const save=await sb.from("daesung_outbound_batches").upsert(payload,{onConflict:"batch_key"});
     if (save.error) throw save.error;
-    alert(`${file.name} を取り込みました。\n出庫記録：${parsed.batches.length}件\nこれから運送状台帳と自動照合します。`);
+    alert(`${file.name} を取り込みました。\n出庫記録：${parsed.batches.length}件\nこれから出荷依頼の商品・数量と自動照合します。`);
     await loadDaesungTab();
   } catch(e) {
     if (importId) await sb.from("daesung_excel_imports").delete().eq("id",importId);
