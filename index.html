@@ -125,8 +125,28 @@ table.ledger tr.recon-exact td:first-child{box-shadow:inset 4px 0 var(--ok)}
 table.ledger tr.recon-mismatch td:first-child{box-shadow:inset 4px 0 var(--err)}
 table.ledger tr.recon-review td:first-child{box-shadow:inset 4px 0 #d18a18}
 table.ledger tr.recon-unmatched td:first-child{box-shadow:inset 4px 0 #8a929b}
-.recon-items{max-width:310px;white-space:normal!important;line-height:1.45;font-size:12px}
-.recon-issues{max-width:340px;white-space:normal!important;color:var(--err);font-size:12px;line-height:1.45}
+.recon-compare{min-width:500px;border:1px solid #e4e1d9;border-radius:8px;overflow:hidden;background:#fff}
+.recon-compare-head,.recon-compare-row{display:grid;grid-template-columns:72px minmax(180px,1fr) minmax(180px,1fr)}
+.recon-compare-head{background:#f5f7f8;color:var(--sub);font-size:11px;font-weight:700}
+.recon-compare-head>div{padding:7px 9px}
+.recon-compare-head>div+div,.recon-compare-row>div+div{border-left:1px solid #e7e4dc}
+.recon-compare-row{align-items:stretch;font-size:13px;line-height:1.4}
+.recon-compare-row+.recon-compare-row{border-top:1px solid #e7e4dc}
+.recon-compare-row>div{padding:9px}
+.recon-compare-row.row-exact{background:#f8fcf8}
+.recon-compare-row.row-mismatch{background:#fff8f8}
+.recon-compare-row.row-unmatched{background:#faf9f6}
+.recon-line-state{display:flex;align-items:center;justify-content:center}
+.recon-line-state .match-badge{padding:3px 7px}
+.recon-product{display:block;font-weight:500;color:var(--ink);overflow-wrap:anywhere}
+.recon-qty{display:block;margin-top:3px;color:var(--sub);font:700 12px var(--mono)}
+.recon-missing{display:flex;align-items:center;color:#9aa1a8}
+.recon-issues{max-width:320px;white-space:normal!important;color:var(--err);font-size:12px;line-height:1.5}
+.recon-issues ul{margin:0;padding-left:17px}
+.recon-issues li+li{margin-top:5px}
+table.ledger tr.recon-exact .recon-issues{color:var(--ok)}
+table.ledger tr.recon-review .recon-issues{color:var(--warn)}
+table.ledger tr.recon-unmatched .recon-issues{color:var(--sub)}
 .setup-note{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px}
 
 #modal{position:fixed;inset:0;background:rgba(20,25,30,.45);display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px;z-index:50;overflow:auto}
@@ -242,7 +262,7 @@ table.ledger tr.recon-unmatched td:first-child{box-shadow:inset 4px 0 #8a929b}
       <div class="tablewrap">
         <table class="ledger">
           <thead><tr>
-            <th>Excel出庫日</th><th>台帳日付（参考）</th><th>AWB番号</th><th>Excel出庫内容</th><th>出荷依頼内容</th><th>到着確認</th><th>判定</th><th>差異・確認事項</th>
+            <th>Excel出庫日</th><th>台帳日付（参考）</th><th>AWB番号</th><th>商品・数量の照合</th><th>到着確認</th><th>判定</th><th>差異・確認事項</th>
           </tr></thead>
           <tbody id="reconBody"></tbody>
         </table>
@@ -863,9 +883,16 @@ function compareItemSets(excelItems, requestItems) {
   });
   excelItems.forEach((e,i)=>{ if (!usedE.has(i)) issues.push(`Excelのみ：${e.product} × ${fmtN(e.quantity)}`); });
   requestItems.forEach((s,i)=>{ if (!usedS.has(i)) issues.push(`出荷依頼のみ：${s.product}${s.quantity == null ? "" : " × "+fmtN(s.quantity)}`); });
+  const displayRows=pairs.slice().sort((a,b)=>a.ei-b.ei).map(p=>{
+    const excel=excelItems[p.ei], request=requestItems[p.si];
+    const quantityExact=excel.quantity!=null&&request.quantity!=null&&Math.abs(Number(excel.quantity)-Number(request.quantity))<=.001;
+    return {excel,request,status:quantityExact?"exact":"mismatch",label:quantityExact?"一致":"数量差"};
+  });
+  excelItems.forEach((excel,i)=>{ if(!usedE.has(i)) displayRows.push({excel,request:null,status:"unmatched",label:"Excelのみ"}); });
+  requestItems.forEach((request,i)=>{ if(!usedS.has(i)) displayRows.push({excel:null,request,status:"unmatched",label:"依頼のみ"}); });
   const denom = Math.max(excelItems.length, requestItems.length, 1);
   return {
-    excelItems, requestItems, issues,
+    excelItems, requestItems, issues, displayRows,
     contentScore:(pairs.length/denom)*.58+(qtyExact.length/denom)*.42,
     exact:!!excelItems.length && !!requestItems.length && !issues.length,
   };
@@ -939,8 +966,23 @@ function buildDaesungResults() {
 }
 const RECON_LABEL={exact:"完全一致",mismatch:"不一致",review:"要確認",unmatched:"未照合"};
 const ARRIVAL_LABEL={exact:"一致",mismatch:"不一致",review:"未確認",unmatched:"—"};
-function itemsSummary(items) {
-  return items.length ? items.map(x=>`${x.product} × ${fmtN(x.quantity)}`).join(" / ") : "—";
+function compareSideHtml(item) {
+  if(!item) return `<div class="recon-missing">—</div>`;
+  return `<div><span class="recon-product">${esc(item.product)}</span><span class="recon-qty">数量 ${esc(fmtN(item.quantity))}</span></div>`;
+}
+function comparisonHtml(excelItems,requestItems) {
+  const rows=compareItemSets(excelItems||[],requestItems||[]).displayRows;
+  if(!rows.length) return `<div class="recon-compare"><div class="recon-compare-row row-unmatched"><div class="recon-line-state">—</div><div class="recon-missing">記録なし</div><div class="recon-missing">記録なし</div></div></div>`;
+  return `<div class="recon-compare">
+    <div class="recon-compare-head"><div>結果</div><div>DAESUNG報告（Excel）</div><div>弊社の出荷依頼</div></div>
+    ${rows.map(row=>`<div class="recon-compare-row row-${row.status}">
+      <div class="recon-line-state"><span class="match-badge ${row.status}">${esc(row.label)}</span></div>
+      ${compareSideHtml(row.excel)}${compareSideHtml(row.request)}
+    </div>`).join("")}
+  </div>`;
+}
+function issuesHtml(issues) {
+  return issues?.length ? `<ul>${issues.map(issue=>`<li>${esc(issue)}</li>`).join("")}</ul>` : "—";
 }
 function reconBadge(status) { return `<span class="match-badge ${status}">${RECON_LABEL[status]}</span>`; }
 function arrivalBadge(arrival) {
@@ -983,11 +1025,10 @@ function drawDaesung() {
       <td class="mono">${esc(x.batch?.outbound_date||"")}</td>
       <td class="mono">${dates.length?dates.map(esc).join("<br>"):"—"}</td>
       <td>${awbs||"—"}</td>
-      <td class="recon-items">${esc(itemsSummary(x.excelItems))}</td>
-      <td class="recon-items">${esc(itemsSummary(x.shipItems))}</td>
+      <td>${comparisonHtml(x.excelItems,x.shipItems)}</td>
       <td>${arrivalBadge(x.arrival)}</td>
       <td>${reconBadge(x.status)}</td>
-      <td class="recon-issues">${esc(x.issues.join(" / "))}</td></tr>`;
+      <td class="recon-issues">${issuesHtml(x.issues)}</td></tr>`;
   }).join("");
   document.querySelectorAll("[data-recon-open]").forEach(b=>b.onclick=()=>openDetail(b.dataset.reconOpen));
 }
