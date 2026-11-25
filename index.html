@@ -151,6 +151,43 @@ table.ledger tr.recon-review .recon-issues{color:var(--warn)}
 table.ledger tr.recon-unmatched .recon-issues{color:var(--sub)}
 .setup-note{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px}
 
+.trade-intro{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.trade-intro .copy{flex:1;min-width:280px}
+.trade-intro h3{font-size:16px;margin:0 0 5px}
+.trade-intro p{font-size:12px;color:var(--sub);line-height:1.7;margin:0}
+.trade-summary{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.trade-kpi{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px 14px;min-height:82px}
+.trade-kpi .label{color:var(--sub);font-size:12px}
+.trade-kpi .value{font:700 23px var(--mono);margin-top:4px}
+.trade-kpi .note{color:var(--sub);font-size:11px;margin-top:3px}
+.trade-kpi.stock{border-left:5px solid var(--accent)}
+.trade-kpi.unpaid{border-left:5px solid var(--err)}
+.trade-kpi.wait{border-left:5px solid var(--warn)}
+.trade-kpi.arrive{border-left:5px solid #7b6aa8}
+.trade-balance{font-weight:700;font-family:var(--mono);text-align:right}
+.trade-balance.negative{color:var(--err)}
+.trade-balance.positive{color:var(--accent)}
+.trade-status{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.trade-status.ok{background:var(--ok-bg);color:var(--ok)}
+.trade-status.warn{background:var(--warn-bg);color:var(--warn)}
+.trade-status.err{background:var(--err-bg);color:var(--err)}
+.trade-status.info{background:var(--accent-soft);color:var(--accent)}
+.trade-section{margin-top:18px}
+.trade-section-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.trade-section-head h3{font-size:14px;margin:0}
+.trade-section-head .sub{color:var(--sub);font-size:12px}
+.trade-section-head .btn{margin-left:auto}
+.trade-product{font-weight:500;white-space:normal;min-width:190px}
+.trade-note{font-size:11px;color:var(--sub);white-space:normal;line-height:1.5;max-width:260px}
+.trade-detail-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}
+.trade-detail-cards>div{background:#faf9f6;border:1px solid var(--line);border-radius:8px;padding:10px}
+.trade-detail-cards .l{font-size:11px;color:var(--sub)}
+.trade-detail-cards .v{font:700 18px var(--mono);margin-top:3px}
+.trade-modal-section{margin-top:18px}
+.trade-modal-section h4{margin:0 0 8px}
+.trade-empty-cell{color:var(--sub);text-align:center;padding:18px!important}
+.trade-source{font-size:11px;color:var(--sub)}
+
 #modal{position:fixed;inset:0;background:rgba(20,25,30,.45);display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px;z-index:50;overflow:auto}
 #modal .box{background:var(--panel);border-radius:10px;width:min(1120px,100%);padding:22px}
 #modal h3{margin:0 0 4px;font-size:17px}
@@ -166,9 +203,26 @@ table.ledger tr.recon-unmatched .recon-issues{color:var(--sub)}
   .card-body iframe{height:380px;border-right:0;border-bottom:1px solid var(--line)}
   .form{max-height:none}
   .grid{grid-template-columns:1fr}
-  header{gap:12px;padding:0 12px}
-  main{padding:16px}
+  header{height:auto;min-height:56px;gap:8px 12px;padding:9px 12px;flex-wrap:wrap}
+  header h1{font-size:15px}
+  header .who{font-size:11px}
+  header .who #userEmail{display:none}
+  nav{order:3;width:100%;overflow-x:auto;padding-bottom:1px}
+  nav button{padding:7px 10px;white-space:nowrap}
+  main{padding:12px}
   .recon-summary{grid-template-columns:1fr 1fr}
+  .trade-summary,.trade-detail-cards{grid-template-columns:1fr 1fr}
+  .trade-intro{padding:14px;gap:10px}
+  .trade-intro .copy{min-width:0;width:100%}
+  .toolbar input[type=search]{min-width:0;width:100%}
+  .trade-section-head{align-items:flex-start;flex-direction:column;gap:3px}
+  #modal{padding:2vh 8px}
+  #modal .box{padding:16px}
+}
+@media (max-width:520px){
+  .trade-summary{grid-template-columns:1fr}
+  .trade-detail-cards{grid-template-columns:1fr 1fr}
+  .trade-intro>.btn{flex:1;white-space:nowrap}
 }
 </style>
 </head>
@@ -189,6 +243,7 @@ table.ledger tr.recon-unmatched .recon-issues{color:var(--sub)}
       <button data-tab="import" class="on">取込</button>
       <button data-tab="ledger">荷物一覧</button>
       <button data-tab="daesung">DAESUNG照合</button>
+      <button data-tab="trade">取引・在庫</button>
     </nav>
     <div class="who"><span id="userEmail"></span><button class="btn" id="logoutBtn">ログアウト</button></div>
   </header>
@@ -269,6 +324,53 @@ table.ledger tr.recon-unmatched .recon-issues{color:var(--sub)}
           <tbody id="reconBody"></tbody>
         </table>
         <div class="empty hidden" id="reconEmpty">照合データがありません</div>
+      </div>
+    </section>
+
+    <section id="tab-trade" class="hidden">
+      <div id="tradeSetup" class="setup-note hidden">初回設定SQLが未実行のため、商品名の紐付けと残数調整はまだ保存できません。集計結果の確認はできます。</div>
+      <div class="trade-intro">
+        <div class="copy">
+          <h3>DAESUNG取引・在庫管理</h3>
+          <p>INVOICE・送金明細・出荷依頼・DAESUNG月次報告・到着実績を商品単位で一本化します。購入済みでDAESUNGに残っている数量、未払い、出荷待ち、未到着を同時に確認できます。</p>
+        </div>
+        <button class="btn" id="tradeAdjustBtn">残数を調整</button>
+        <button class="btn primary" id="tradeRefreshBtn">最新データに更新</button>
+      </div>
+      <div class="trade-summary">
+        <div class="trade-kpi stock"><div class="label">DAESUNG保管残</div><div class="value" id="tradeStockTotal">—</div><div class="note" id="tradeStockNote"></div></div>
+        <div class="trade-kpi unpaid"><div class="label">未払い・一部支払い</div><div class="value" id="tradeUnpaidCount">—</div><div class="note" id="tradeUnpaidAmount"></div></div>
+        <div class="trade-kpi wait"><div class="label">出荷待ち</div><div class="value" id="tradeDispatchWait">—</div><div class="note">依頼数－DAESUNG出庫数</div></div>
+        <div class="trade-kpi arrive"><div class="label">到着未確認</div><div class="value" id="tradeArrivalWait">—</div><div class="note">出庫数－到着確認数</div></div>
+      </div>
+      <div class="toolbar">
+        <input type="search" id="tradeQ" placeholder="商品名・請求書・AWBで検索">
+        <select id="tradeFilter">
+          <option value="">状態：すべて</option>
+          <option value="attention">要確認のみ</option>
+          <option value="stock">保管残あり</option>
+          <option value="unpaid">未払いあり</option>
+          <option value="dispatch">出荷待ち</option>
+          <option value="arrival">到着未確認</option>
+        </select>
+        <span class="count" id="tradeCount"></span>
+      </div>
+      <div class="tablewrap">
+        <table class="ledger">
+          <thead><tr><th>商品</th><th style="text-align:right">購入数</th><th>支払い</th><th style="text-align:right">DAESUNG出庫</th><th style="text-align:right">DAESUNG保管残</th><th style="text-align:right">出荷依頼</th><th style="text-align:right">到着確認</th><th style="text-align:right">未到着</th><th>判定</th><th>確認事項</th></tr></thead>
+          <tbody id="tradeBody"></tbody>
+        </table>
+        <div class="empty hidden" id="tradeEmpty">対象データがありません</div>
+      </div>
+
+      <div class="trade-section">
+        <div class="trade-section-head"><h3>未払い・一部支払いの請求書</h3><span class="sub">送金明細との照合状況</span></div>
+        <div class="tablewrap"><table class="ledger"><thead><tr><th>請求日</th><th>請求書番号</th><th>通貨</th><th style="text-align:right">請求額</th><th style="text-align:right">照合済</th><th style="text-align:right">未払い</th><th>状態</th></tr></thead><tbody id="tradePaymentBody"></tbody></table></div>
+      </div>
+
+      <div class="trade-section">
+        <div class="trade-section-head"><h3>商品名の未照合</h3><span class="sub">同じ商品でも表記が違う場合は、一度紐付けると次回から自動集計します</span></div>
+        <div class="tablewrap"><table class="ledger"><thead><tr><th>取得元</th><th>商品名</th><th style="text-align:right">数量</th><th>日付・番号</th><th></th></tr></thead><tbody id="tradeUnmatchedBody"></tbody></table></div>
       </div>
     </section>
   </main>
@@ -528,8 +630,10 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   $("#tab-import").classList.toggle("hidden", b.dataset.tab !== "import");
   $("#tab-ledger").classList.toggle("hidden", b.dataset.tab !== "ledger");
   $("#tab-daesung").classList.toggle("hidden", b.dataset.tab !== "daesung");
+  $("#tab-trade").classList.toggle("hidden", b.dataset.tab !== "trade");
   if (b.dataset.tab === "ledger") loadLedger(true);
   if (b.dataset.tab === "daesung") loadDaesungTab();
+  if (b.dataset.tab === "trade") loadTradeTab();
 });
 
 // ---------- 取込 ----------
@@ -837,7 +941,7 @@ function dayGap(a, b) {
 }
 function isDaesung(r) {
   const n = normA(`${r.wb_shipper ?? ""} ${r.inv_shipper ?? ""}`);
-  return n.includes("DAESUNG") || n.includes("YONSUPARK");
+  return n.includes("DAESUNG") || n.includes("DEASUNG") || n.includes("YONSUPARK");
 }
 const DAESUNG_DATE_WINDOW_DAYS = 21;
 const DAESUNG_MAX_GROUP_SIZE = 4;
@@ -1066,6 +1170,269 @@ async function importDaesungFile(file, btn) {
 $("#daesungPickBtn").onclick=()=>$("#daesungFile").click();
 $("#daesungFile").onchange=e=>{ const f=e.target.files?.[0]; e.target.value=""; if(f) importDaesungFile(f,$("#daesungPickBtn")); };
 $("#reconFilter").oninput=drawDaesung; $("#reconMonth").oninput=drawDaesung;
+
+// ---------- DAESUNG取引・在庫管理 ----------
+// INVOICE台帳、送金明細、DAESUNG月次報告、出荷依頼、到着確認を
+// 商品マスター（price_products）を軸に集計する。
+let TRADE_DATA=null, TRADE_LOADING=false, TRADE_SETUP_READY=true;
+const TRADE_EPS=.001;
+
+function tradeSupplierName(v) {
+  const n=normA(v);
+  return n.includes("DAESUNG")||n.includes("DEASUNG")||n.includes("YONSUPARK");
+}
+const tradeCatalogKey=v=>String(v??"").toUpperCase().replace(/[^A-Z0-9\u3040-\u30FF\u4E00-\u9FFF]/g,"");
+const tradePriceAliasKey=(supplier,name)=>`${tradeCatalogKey(supplier)}|${tradeCatalogKey(name)}`;
+const tradeManualAliasKey=name=>productNorm(name);
+const tradeQty=n=>Number(n||0);
+const tradeStatusBadge=(status,label)=>`<span class="trade-status ${status}">${esc(label)}</span>`;
+function tradeMoney(n,currency) {
+  return `${Number(n||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})} ${esc(currency||"")}`.trim();
+}
+function tradeMoneySummary(rows,key="unpaid") {
+  const by={};
+  rows.forEach(r=>{ const c=r.currency||"通貨不明"; by[c]=(by[c]||0)+Number(r[key]||0); });
+  return Object.entries(by).map(([c,n])=>`${fmtN(n,2)} ${c}`).join(" / ")||"0";
+}
+function tradePaymentState(invoice,linksByInvoice) {
+  const total=Number(invoice.total_amount||0);
+  const allocated=(linksByInvoice.get(String(invoice.id))||[]).reduce((s,r)=>s+Number(r.allocated_amount||0),0);
+  const unpaid=Math.max(0,total-allocated);
+  const state=unpaid<=.01?"paid":allocated>.01?"partial":"unpaid";
+  return {...invoice,allocated,unpaid,payment_state:state};
+}
+function tradePaymentBadge(p) {
+  if (!p.unpaid_count) return tradeStatusBadge("ok","支払済");
+  return p.partial_count ? tradeStatusBadge("warn",`一部・未払い ${p.unpaid_count}件`) : tradeStatusBadge("err",`未払い ${p.unpaid_count}件`);
+}
+function tradeBuildCatalog(products,priceAliases,manualAliases) {
+  const byId=new Map(), exact=new Map(), aliases=new Map();
+  (products||[]).forEach(p=>{
+    const item={id:String(p.id),name:p.name||"名称未設定",unit:p.compare_unit||"個"};
+    byId.set(item.id,item);
+    const k=productNorm(item.name); if(k) exact.set(k,item);
+  });
+  (priceAliases||[]).forEach(a=>aliases.set(a.alias_key,a));
+  const manual=new Map();
+  (manualAliases||[]).forEach(a=>manual.set(`${a.source_type}|${a.alias_key}`,a));
+  return {byId,exact,aliases,manual};
+}
+function tradeResolve(catalog,source,name,supplier="DAESUNG") {
+  const key=tradeManualAliasKey(name), saved=catalog.manual.get(`${source}|${key}`);
+  if(saved&&catalog.byId.has(String(saved.product_id))) return {product:catalog.byId.get(String(saved.product_id)),factor:Number(saved.factor||1),method:"saved"};
+  if(source==="invoice") {
+    const a=catalog.aliases.get(tradePriceAliasKey(supplier,name));
+    if(a&&catalog.byId.has(String(a.product_id))) return {product:catalog.byId.get(String(a.product_id)),factor:Number(a.units||1),method:"price_alias"};
+  }
+  if(catalog.exact.has(key)) return {product:catalog.exact.get(key),factor:1,method:"exact"};
+  const ranked=[...catalog.byId.values()].map(p=>({p,score:diceScore(name,p.name)})).sort((a,b)=>b.score-a.score);
+  if(ranked[0]?.score>=.88&&(!ranked[1]||ranked[0].score-ranked[1].score>=.08)) return {product:ranked[0].p,factor:1,method:"auto"};
+  return null;
+}
+function tradeNewProduct(product) {
+  return {id:String(product.id),name:product.name,unit:product.unit,purchased:0,outbound:0,requested:0,arrived:0,adjustment:0,
+    invoice_ids:new Set(),unpaid_ids:new Set(),partial_ids:new Set(),purchases:[],outbounds:[],requests:[],arrivals:[],adjustments:[],search:""};
+}
+function buildTradeData(raw) {
+  const catalog=tradeBuildCatalog(raw.products,raw.priceAliases,raw.manualAliases);
+  const products=new Map();
+  const get=p=>{ const id=String(p.id); if(!products.has(id)) products.set(id,tradeNewProduct(p)); return products.get(id); };
+  const unmatched=[];
+  const linksByInvoice=new Map();
+  (raw.links||[]).forEach(x=>{ const k=String(x.invoice_id); if(!linksByInvoice.has(k)) linksByInvoice.set(k,[]); linksByInvoice.get(k).push(x); });
+  const invoices=(raw.invoices||[]).filter(x=>tradeSupplierName(x.supplier)).map(x=>tradePaymentState(x,linksByInvoice));
+
+  invoices.forEach(inv=>(inv.invoice_items||[]).forEach(line=>{
+    if(!line.description||line.quantity==null) return;
+    const resolved=tradeResolve(catalog,"invoice",line.description,inv.supplier);
+    const base={source:"invoice",name:line.description,quantity:Math.abs(Number(line.quantity||0)),date:inv.invoice_date||"",ref:inv.invoice_no||"",invoice_id:String(inv.id)};
+    if(!resolved) { unmatched.push(base); return; }
+    const qty=base.quantity*resolved.factor, p=get(resolved.product);
+    p.purchased+=qty; p.invoice_ids.add(String(inv.id)); if(inv.payment_state!=="paid")p.unpaid_ids.add(String(inv.id)); if(inv.payment_state==="partial")p.partial_ids.add(String(inv.id));
+    p.purchases.push({...base,quantity:qty,raw_quantity:base.quantity,factor:resolved.factor,payment_state:inv.payment_state});
+  }));
+
+  (raw.batches||[]).forEach(batch=>(batch.items||[]).forEach(line=>{
+    if(!line.product||line.quantity==null)return;
+    const resolved=tradeResolve(catalog,"excel",line.product), base={source:"excel",name:line.product,quantity:Math.abs(Number(line.quantity||0)),date:batch.outbound_date||"",ref:batch.source_column||batch.batch_key||""};
+    if(!resolved){unmatched.push(base);return;}
+    const qty=base.quantity*resolved.factor,p=get(resolved.product);p.outbound+=qty;p.outbounds.push({...base,quantity:qty,raw_quantity:base.quantity,factor:resolved.factor});
+  }));
+
+  (raw.shipments||[]).filter(isDaesung).forEach(ship=>(ship.shipment_contents||[]).forEach(line=>{
+    if(!line.product)return;
+    const resolved=tradeResolve(catalog,"request",line.product), requested=line.requested_qty==null?null:Math.abs(Number(line.requested_qty)), received=line.received_qty==null?null:Math.abs(Number(line.received_qty));
+    const base={source:"request",name:line.product,quantity:requested||0,date:ship.wb_ship_date||ship.inv_date||"",ref:ship.awb_no||"",shipment_id:String(ship.id),arrival_date:ship.arrival_date||""};
+    if(!resolved){if(requested!=null)unmatched.push(base);return;}
+    const p=get(resolved.product),factor=resolved.factor;
+    if(requested!=null){const q=requested*factor;p.requested+=q;p.requests.push({...base,quantity:q,raw_quantity:requested,factor});}
+    if(received!=null){const q=received*factor;p.arrived+=q;p.arrivals.push({...base,quantity:q,raw_quantity:received,factor,date:ship.arrival_date||base.date});}
+  }));
+
+  (raw.adjustments||[]).forEach(a=>{
+    const product=catalog.byId.get(String(a.product_id)); if(!product)return;
+    const p=get(product),q=Number(a.quantity||0);p.adjustment+=q;p.adjustments.push({...a,quantity:q,date:a.adjustment_date||"",ref:a.reason||"調整"});
+  });
+
+  const rows=[...products.values()].map(p=>{
+    p.held=p.purchased+p.adjustment-p.outbound;
+    p.pending_dispatch=Math.max(0,p.requested-p.outbound);
+    p.pending_arrival=Math.max(0,p.outbound-p.arrived);
+    p.unpaid_count=p.unpaid_ids.size;p.partial_count=p.partial_ids.size;
+    const issues=[];
+    if(p.held<-TRADE_EPS)issues.push("DAESUNG出庫数が購入数と残数調整を超えています");
+    if(p.arrived-p.outbound>TRADE_EPS)issues.push("到着確認数がDAESUNG出庫数を超えています");
+    if(p.requested-p.purchased-p.adjustment>TRADE_EPS)issues.push("出荷依頼数が購入数と残数調整を超えています");
+    if(p.pending_dispatch>TRADE_EPS)issues.push(`出荷待ち ${fmtN(p.pending_dispatch)} ${p.unit}`);
+    if(p.pending_arrival>TRADE_EPS)issues.push(`到着未確認 ${fmtN(p.pending_arrival)} ${p.unit}`);
+    if(p.unpaid_count)issues.push(`未払い・一部支払いの請求書 ${p.unpaid_count}件`);
+    p.status=issues.some(x=>x.includes("超えています"))?"err":issues.length?"warn":"ok";
+    p.issues=issues;
+    p.search=normA([p.name,...p.purchases.map(x=>x.ref),...p.requests.map(x=>x.ref)].join(" "));
+    return p;
+  }).sort((a,b)=>(b.status==="err")-(a.status==="err")||(b.status==="warn")-(a.status==="warn")||a.name.localeCompare(b.name,"ja"));
+  const unpaidInvoices=invoices.filter(x=>x.payment_state!=="paid").sort((a,b)=>String(b.invoice_date||"").localeCompare(String(a.invoice_date||"")));
+  return {products:rows,unmatched,invoices,unpaidInvoices,catalog};
+}
+
+function tradeFilterMatch(p,f) {
+  if(!f)return true;
+  if(f==="attention")return p.status==="err"||p.status==="warn";
+  if(f==="stock")return p.held>TRADE_EPS;
+  if(f==="unpaid")return p.unpaid_count>0;
+  if(f==="dispatch")return p.pending_dispatch>TRADE_EPS;
+  if(f==="arrival")return p.pending_arrival>TRADE_EPS;
+  return true;
+}
+function tradeFilteredProducts() {
+  if(!TRADE_DATA)return[];
+  const q=normA($("#tradeQ").value),f=$("#tradeFilter").value;
+  return TRADE_DATA.products.filter(p=>tradeFilterMatch(p,f)&&(!q||p.search.includes(q)));
+}
+function tradeProductStatus(p) {
+  if(p.status==="err")return tradeStatusBadge("err","不整合");
+  if(p.status==="warn")return tradeStatusBadge("warn","要確認");
+  return tradeStatusBadge("ok","整合");
+}
+function drawTrade() {
+  if(!TRADE_DATA)return;
+  const rows=tradeFilteredProducts(),all=TRADE_DATA.products;
+  const stock=all.filter(p=>p.held>TRADE_EPS),dispatch=all.filter(p=>p.pending_dispatch>TRADE_EPS),arrival=all.filter(p=>p.pending_arrival>TRADE_EPS);
+  $("#tradeStockTotal").textContent=`${stock.length}商品`;
+  $("#tradeStockNote").textContent=stock.length?`保管残の数量合計 ${fmtN(stock.reduce((s,p)=>s+p.held,0))}（商品単位の合算）`:"DAESUNG保管残なし";
+  $("#tradeUnpaidCount").textContent=`${TRADE_DATA.unpaidInvoices.length}件`;
+  $("#tradeUnpaidAmount").textContent=tradeMoneySummary(TRADE_DATA.unpaidInvoices);
+  $("#tradeDispatchWait").textContent=`${dispatch.length}商品`;
+  $("#tradeArrivalWait").textContent=`${arrival.length}商品`;
+  $("#tradeCount").textContent=`${rows.length} 商品`;
+  $("#tradeEmpty").classList.toggle("hidden",rows.length>0);
+  $("#tradeBody").innerHTML=rows.map(p=>`<tr data-trade-product="${esc(p.id)}">
+    <td><button class="trade-product awb-track" data-trade-open="${esc(p.id)}">${esc(p.name)}</button><div class="trade-source">単位：${esc(p.unit)}</div></td>
+    <td class="mono" style="text-align:right">${fmtN(p.purchased)}</td><td>${tradePaymentBadge(p)}</td>
+    <td class="mono" style="text-align:right">${fmtN(p.outbound)}</td><td class="mono" style="text-align:right">${fmtN(p.held)}</td>
+    <td class="mono" style="text-align:right">${fmtN(p.requested)}</td><td class="mono" style="text-align:right">${fmtN(p.arrived)}</td>
+    <td class="mono" style="text-align:right">${fmtN(p.pending_arrival)}</td><td>${tradeProductStatus(p)}</td>
+    <td class="trade-note">${p.issues.length?p.issues.map(esc).join("<br>"):"問題なし"}</td></tr>`).join("");
+  document.querySelectorAll("[data-trade-open]").forEach(b=>b.onclick=()=>openTradeProduct(b.dataset.tradeOpen));
+
+  $("#tradePaymentBody").innerHTML=TRADE_DATA.unpaidInvoices.length?TRADE_DATA.unpaidInvoices.map(inv=>`<tr>
+    <td class="mono">${esc(inv.invoice_date||"")}</td><td class="mono">${esc(inv.invoice_no||"")}</td><td>${esc(inv.currency||"")}</td>
+    <td class="mono" style="text-align:right">${tradeMoney(inv.total_amount,inv.currency)}</td><td class="mono" style="text-align:right">${tradeMoney(inv.allocated,inv.currency)}</td>
+    <td class="mono" style="text-align:right">${tradeMoney(inv.unpaid,inv.currency)}</td><td>${inv.payment_state==="partial"?tradeStatusBadge("warn","一部支払い"):tradeStatusBadge("err","未払い")}</td></tr>`).join("")
+    :`<tr><td colspan="7" class="trade-empty-cell">未払いの請求書はありません</td></tr>`;
+  $("#tradeUnmatchedBody").innerHTML=TRADE_DATA.unmatched.length?TRADE_DATA.unmatched.map((u,i)=>`<tr>
+    <td>${u.source==="invoice"?"INVOICE":u.source==="excel"?"DAESUNG月次Excel":"出荷依頼"}</td><td>${esc(u.name)}</td><td class="mono" style="text-align:right">${fmtN(u.quantity)}</td>
+    <td>${esc(u.date||"")} ${esc(u.ref||"")}</td><td><button class="btn small" data-trade-alias="${i}">商品に紐付ける</button></td></tr>`).join("")
+    :`<tr><td colspan="5" class="trade-empty-cell">未照合の商品名はありません</td></tr>`;
+  document.querySelectorAll("[data-trade-alias]").forEach(b=>b.onclick=()=>openTradeAlias(Number(b.dataset.tradeAlias)));
+}
+
+async function loadTradeTab() {
+  if(TRADE_LOADING)return; TRADE_LOADING=true;
+  const btn=$("#tradeRefreshBtn"),old=btn.textContent;btn.disabled=true;btn.innerHTML='<span class="spinner"></span>集計中…';
+  try {
+    const [inv,links,ships,batches,products,aliases,manual,adjustments]=await Promise.all([
+      sb.from("invoices").select("*, invoice_items(*)"),
+      sb.from("remittance_invoice_links").select("invoice_id,remittance_id,allocated_amount"),
+      sb.from("shipments").select("*, shipment_contents(*)"),
+      sb.from("daesung_outbound_batches").select("*"),
+      sb.from("price_products").select("*"),
+      sb.from("price_aliases").select("*"),
+      sb.from("daesung_trade_aliases").select("*"),
+      sb.from("daesung_stock_adjustments").select("*").order("adjustment_date",{ascending:false}),
+    ]);
+    const required=[inv,links,ships,batches,products,aliases],failed=required.find(x=>x.error);
+    if(failed)throw failed.error;
+    TRADE_SETUP_READY=!manual.error&&!adjustments.error;
+    $("#tradeSetup").classList.toggle("hidden",TRADE_SETUP_READY);
+    TRADE_DATA=buildTradeData({invoices:inv.data,links:links.data,shipments:ships.data,batches:batches.data,products:products.data,priceAliases:aliases.data,manualAliases:manual.data||[],adjustments:adjustments.data||[]});
+    drawTrade();
+  } catch(e) { alert("取引・在庫データの読み込みに失敗しました："+(e.message||e)); }
+  finally {TRADE_LOADING=false;btn.disabled=false;btn.textContent=old;}
+}
+function tradeDetailTable(rows,kind) {
+  if(!rows.length)return`<div class="trade-note">記録なし</div>`;
+  return `<div class="tablewrap"><table class="ledger"><thead><tr><th>日付</th><th>番号</th><th>元の商品名</th><th style="text-align:right">数量</th><th></th></tr></thead><tbody>${rows.map(r=>`<tr>
+    <td class="mono">${esc(r.date||r.adjustment_date||"")}</td><td class="mono">${esc(r.ref||r.invoice_no||"")}</td><td>${esc(r.name||r.reason||"")}</td><td class="mono" style="text-align:right">${fmtN(r.quantity)}</td>
+    <td>${r.shipment_id?`<button class="btn small" data-trade-awb="${esc(r.shipment_id)}">AWBを開く</button>`:""}${kind==="adjustment"?`<button class="btn small danger" data-trade-del-adjust="${esc(r.id)}">削除</button>`:""}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function openTradeProduct(id) {
+  const p=TRADE_DATA?.products.find(x=>String(x.id)===String(id));if(!p)return;
+  $("#modalBox").innerHTML=`<h3>${esc(p.name)} ${tradeProductStatus(p)}</h3><div class="meta">管理単位：${esc(p.unit)}</div>
+    <div class="trade-detail-cards"><div><div class="l">購入数</div><div class="v">${fmtN(p.purchased)}</div></div><div><div class="l">DAESUNG出庫</div><div class="v">${fmtN(p.outbound)}</div></div><div><div class="l">DAESUNG保管残</div><div class="v">${fmtN(p.held)}</div></div><div><div class="l">到着確認</div><div class="v">${fmtN(p.arrived)}</div></div></div>
+    <div class="alert ${p.status==="err"?"err":p.status==="warn"?"warn":"ok"}">${p.issues.length?p.issues.map(esc).join("<br>"):"購入・出庫・到着の数量は整合しています"}</div>
+    <div class="trade-modal-section"><h4>購入（INVOICE台帳）</h4>${tradeDetailTable(p.purchases,"purchase")}</div>
+    <div class="trade-modal-section"><h4>DAESUNG出庫（月次Excel）</h4>${tradeDetailTable(p.outbounds,"outbound")}</div>
+    <div class="trade-modal-section"><h4>弊社の出荷依頼</h4>${tradeDetailTable(p.requests,"request")}</div>
+    <div class="trade-modal-section"><h4>到着確認</h4>${tradeDetailTable(p.arrivals,"arrival")}</div>
+    <div class="trade-modal-section"><h4>残数調整</h4>${tradeDetailTable(p.adjustments,"adjustment")}</div>
+    <div class="actions"><button class="btn" id="tradeDetailAdjust">残数を調整</button><button class="btn" id="tradeDetailClose">閉じる</button></div>`;
+  $("#modal").classList.remove("hidden");
+  $("#tradeDetailClose").onclick=closeModal;$("#tradeDetailAdjust").onclick=()=>openTradeAdjustment(p.id);
+  document.querySelectorAll("[data-trade-awb]").forEach(b=>b.onclick=()=>{closeModal();openDetail(b.dataset.tradeAwb);});
+  document.querySelectorAll("[data-trade-del-adjust]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("この残数調整を削除しますか？"))return;
+    const {error}=await sb.from("daesung_stock_adjustments").delete().eq("id",b.dataset.tradeDelAdjust);if(error){alert(error.message);return;}closeModal();await loadTradeTab();
+  });
+}
+function tradeProductOptions(selected="") {
+  return [...TRADE_DATA.catalog.byId.values()].sort((a,b)=>a.name.localeCompare(b.name,"ja")).map(p=>`<option value="${esc(p.id)}" ${String(p.id)===String(selected)?"selected":""}>${esc(p.name)}（${esc(p.unit)}）</option>`).join("");
+}
+function openTradeAlias(index) {
+  const u=TRADE_DATA?.unmatched[index];if(!u)return;
+  if(!TRADE_SETUP_READY){alert("先に初回設定SQLを実行してください");return;}
+  $("#modalBox").innerHTML=`<h3>商品名を紐付ける</h3><div class="meta">${esc(u.name)}</div><div class="grid">
+    <div class="f wide"><label>紐付け先の商品</label><select id="tradeAliasProduct"><option value="">選択してください</option>${tradeProductOptions()}</select></div>
+    <div class="f"><label>数量の換算倍率</label><input id="tradeAliasFactor" type="number" step="0.001" min="0.001" value="1"></div></div>
+    <div class="alert info">例：Excelの1箱が台帳の10本に相当する場合は「10」。通常は「1」です。</div>
+    <div class="actions"><button class="btn" id="tradeAliasClose">キャンセル</button><button class="btn primary" id="tradeAliasSave">保存</button></div>`;
+  $("#modal").classList.remove("hidden");$("#tradeAliasClose").onclick=closeModal;
+  $("#tradeAliasSave").onclick=async e=>{
+    const pid=$("#tradeAliasProduct").value,factor=Number($("#tradeAliasFactor").value);if(!pid||!factor||factor<=0){alert("商品と換算倍率を確認してください");return;}
+    const p=TRADE_DATA.catalog.byId.get(String(pid)),btn=e.target;btn.disabled=true;btn.innerHTML='<span class="spinner"></span>保存中…';
+    const rec={source_type:u.source,alias_key:tradeManualAliasKey(u.name),alias_name:u.name,product_id:String(pid),product_name:p.name,unit:p.unit,factor,updated_at:new Date().toISOString()};
+    const {error}=await sb.from("daesung_trade_aliases").upsert(rec,{onConflict:"source_type,alias_key"});if(error){alert("保存に失敗しました："+error.message);btn.disabled=false;btn.textContent="保存";return;}closeModal();await loadTradeTab();
+  };
+}
+function openTradeAdjustment(productId="") {
+  if(!TRADE_SETUP_READY){alert("先に初回設定SQLを実行してください");return;}
+  $("#modalBox").innerHTML=`<h3>DAESUNG保管残を調整</h3><div class="meta">導入時の開始残、返品、破損、棚卸差異など、購入・出庫だけでは表せない増減を登録します。</div><div class="grid">
+    <div class="f wide"><label>商品</label><select id="tradeAdjProduct"><option value="">選択してください</option>${tradeProductOptions(productId)}</select></div>
+    <div class="f"><label>日付</label><input id="tradeAdjDate" type="date" value="${new Date().toLocaleDateString("sv-SE")}"></div>
+    <div class="f"><label>増減数量（減らす場合はマイナス）</label><input id="tradeAdjQty" type="number" step="0.001"></div>
+    <div class="f"><label>理由</label><select id="tradeAdjReason"><option>開始時在庫</option><option>返品</option><option>破損・廃棄</option><option>棚卸差異</option><option>その他</option></select></div>
+    <div class="f wide"><label>メモ</label><input id="tradeAdjMemo"></div></div>
+    <div class="actions"><button class="btn" id="tradeAdjClose">キャンセル</button><button class="btn primary" id="tradeAdjSave">保存</button></div>`;
+  $("#modal").classList.remove("hidden");$("#tradeAdjClose").onclick=closeModal;
+  $("#tradeAdjSave").onclick=async e=>{
+    const pid=$("#tradeAdjProduct").value,q=Number($("#tradeAdjQty").value),date=$("#tradeAdjDate").value;if(!pid||!date||!Number.isFinite(q)||Math.abs(q)<TRADE_EPS){alert("商品・日付・増減数量を確認してください");return;}
+    const p=TRADE_DATA.catalog.byId.get(String(pid)),btn=e.target;btn.disabled=true;btn.innerHTML='<span class="spinner"></span>保存中…';
+    const {error}=await sb.from("daesung_stock_adjustments").insert({adjustment_date:date,product_id:String(pid),product_name:p.name,unit:p.unit,quantity:q,reason:$("#tradeAdjReason").value,memo:$("#tradeAdjMemo").value.trim()||null});
+    if(error){alert("保存に失敗しました："+error.message);btn.disabled=false;btn.textContent="保存";return;}closeModal();await loadTradeTab();
+  };
+}
+$("#tradeQ").oninput=drawTrade;$("#tradeFilter").oninput=drawTrade;
+$("#tradeRefreshBtn").onclick=loadTradeTab;$("#tradeAdjustBtn").onclick=()=>openTradeAdjustment();
 
 // ---------- 荷物一覧 ----------
 let LEDGER = [];
