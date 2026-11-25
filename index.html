@@ -103,6 +103,16 @@ table.ledger tr:hover td{background:#fbfaf7;cursor:pointer}
 .doc.miss{background:var(--muted-bg);color:#9aa1a8}
 .wcount{color:var(--warn);font-size:12px}
 .empty{padding:40px;text-align:center;color:var(--sub)}
+.awb-track{border:0;background:none;color:var(--accent);font:600 13px var(--mono);padding:2px 0;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.awb-track:hover{color:#123755}
+.tracking-result{margin-top:10px;padding:11px 12px;border-radius:7px;font-size:13px;line-height:1.6}
+.tracking-result.ok{background:var(--ok-bg);color:var(--ok)}
+.tracking-result.info{background:var(--accent-soft);color:var(--accent)}
+.tracking-result.warn{background:var(--warn-bg);color:var(--warn)}
+.tracking-result.err{background:var(--err-bg);color:var(--err)}
+.tracking-result strong{display:block;margin-bottom:2px}
+.tracking-result .btn{display:inline-block;margin-top:7px;text-decoration:none;color:inherit;background:#fff}
+.tracking-note{color:var(--sub);font-size:11px;margin-top:5px}
 
 .recon-upload{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
 .recon-upload .copy{flex:1;min-width:280px}
@@ -284,6 +294,8 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const FN_NAME = "read-shipping-doc";
 // 出荷依頼シートを読み込む機能（Edge Function）の名前
 const SHEET_FN = "dynamic-worker";
+// DHLの配達状況を取得する機能（Edge Function）の名前
+const DHL_TRACK_FN = "track-dhl-shipment";
 // =========================================================
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -299,6 +311,8 @@ const toNum = (v) => { if (v === "" || v == null) return null; const n = Number(
 const fmt = (n, d = 2) => n == null ? "" : Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 const fmtN = (n, max = 3) => n == null ? "" : Number(n).toLocaleString("en-US", { maximumFractionDigits: max });
 const DOC_LABEL = { waybill: "運送状", invoice: "インボイス" };
+const isDhlShipment = (s) => normA(s?.carrier).includes("DHL");
+const dhlTrackingUrl = (awb) => `https://www.dhl.com/jp-ja/home/tracking.html?submit=1&tracking-id=${encodeURIComponent(normAwb(awb))}`;
 
 // ---------- 項目定義（k = データベースの列、fn = 読み取り結果の名前） ----------
 const WB_FIELDS = [
@@ -1103,7 +1117,7 @@ function drawLedger() {
       : its[0] ? its[0].description + (its.length > 1 ? ` 他${its.length - 1}件` : "") : (r.wb_content || "");
     return `<tr data-id="${r.id}">
       <td class="mono">${esc(r._date)}</td>
-      <td class="mono">${esc(r.awb_no)}</td>
+      <td>${isDhlShipment(r) ? `<button class="awb-track" data-track-awb title="DHLで追跡する">${esc(r.awb_no)}</button>` : `<span class="mono">${esc(r.awb_no)}</span>`}</td>
       <td>${esc(r.carrier ?? "")}</td>
       <td>${esc(r.wb_shipper || r.inv_shipper || "")}</td>
       <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(name)}</td>
@@ -1114,7 +1128,15 @@ function drawLedger() {
       <td>${isDaesung(r) ? (r._daesungRecon ? reconBadge(r._daesungRecon.status) : reconBadge("unmatched")) : ""}</td>
       <td>${r._warns.length ? `<span class="wcount">⚠ ${r._warns.length}</span>` : ""}</td></tr>`;
   }).join("");
-  document.querySelectorAll("#ledgerBody tr").forEach(tr => tr.onclick = () => openDetail(tr.dataset.id));
+  document.querySelectorAll("#ledgerBody tr").forEach(tr => {
+    tr.onclick = () => openDetail(tr.dataset.id);
+    const track = $("[data-track-awb]", tr);
+    if (track) track.onclick = (e) => {
+      e.stopPropagation();
+      openDetail(tr.dataset.id);
+      setTimeout(() => $("#dhlTrackBtn")?.click(), 0);
+    };
+  });
 }
 
 // ---------- 詳細（その場で編集できる） ----------
@@ -1135,7 +1157,7 @@ function openDetail(id) {
   ]);
 
   $("#modalBox").innerHTML = `
-    <h3>AWB ${esc(r.awb_no)}　<span class="tag ${STATUS_CLS[r._status]}">${r._status}</span></h3>
+    <h3>AWB ${isDhlShipment(r) ? `<button class="awb-track" id="dhlTrackHead" title="DHLで追跡する">${esc(r.awb_no)}</button>` : esc(r.awb_no)}　<span class="tag ${STATUS_CLS[r._status]}">${r._status}</span></h3>
     <div class="meta">登録日時 ${new Date(r.created_at).toLocaleString("ja-JP")}${r.confirmed_at ? "　/　確認済 " + new Date(r.confirmed_at).toLocaleString("ja-JP") : ""}</div>
     <div data-host id="dForm">
       <div class="sec"><h4>書類</h4>${docRow("waybill")}${docRow("invoice")}</div>
@@ -1153,7 +1175,8 @@ function openDetail(id) {
       <div class="sec"><h4>到着</h4>
         <div class="grid">
           <div class="f"><label>到着日</label><div class="inline"><input data-arr type="date" value="${esc(r.arrival_date ?? "")}"><button class="btn small" data-act="today">今日</button></div></div>
-          <div class="f">${r._hasInv ? `<label>&nbsp;</label><button class="btn small" data-act="fillqty">届いた数量にインボイスの数量を入れる</button>` : ""}</div>
+          <div class="f"><label>&nbsp;</label><div class="inline">${isDhlShipment(r) ? `<button class="btn primary small" id="dhlTrackBtn">DHLで追跡</button>` : ""}${r._hasInv ? `<button class="btn small" data-act="fillqty">届いた数量にインボイスの数量を入れる</button>` : ""}</div></div>
+          <div class="f wide"><div id="dhlTrackResult"></div></div>
           <div class="f wide"><label>メモ</label><textarea data-memo rows="2">${esc(r.memo ?? "")}</textarea></div>
         </div>
       </div>
@@ -1204,11 +1227,77 @@ function openDetail(id) {
     if (e.target.dataset.deldoc) deleteDoc(r, e.target.dataset.deldoc);
   };
   $("#dClose").onclick = closeModal;
+  if ($("#dhlTrackBtn")) $("#dhlTrackBtn").onclick = (e) => trackDhlShipment(ctx, e.currentTarget);
+  if ($("#dhlTrackHead")) $("#dhlTrackHead").onclick = () => $("#dhlTrackBtn")?.click();
   $("#dSave").onclick = (e) => saveDetail(ctx, e.target, null);
   if ($("#dConfirm")) $("#dConfirm").onclick = (e) => saveDetail(ctx, e.target, "confirm");
   if ($("#dUnconfirm")) $("#dUnconfirm").onclick = (e) => saveDetail(ctx, e.target, "unconfirm");
   $("#dDel").onclick = () => deleteShipment(r);
   refresh();
+}
+
+function trackingTimeText(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  return isNaN(d) ? String(value) : d.toLocaleString("ja-JP");
+}
+
+function trackingLinkHtml(awb) {
+  return `<a class="btn small" href="${esc(dhlTrackingUrl(awb))}" target="_blank" rel="noopener">DHL公式追跡を開く</a>`;
+}
+
+async function trackDhlShipment(ctx, btn) {
+  const result = $("#dhlTrackResult", ctx.f);
+  if (!result || !btn) return;
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>追跡中…';
+  result.innerHTML = `<div class="tracking-result info">DHLへ問い合わせています…</div>`;
+
+  try {
+    const { data, error } = await sb.functions.invoke(DHL_TRACK_FN, { body: { tracking_number: ctx.r.awb_no } });
+    if (error) {
+      let body = {};
+      try { body = await error.context.clone().json(); } catch { /* 本文を読めない場合 */ }
+      const message = body.error || error.message || "DHLの追跡に失敗しました";
+      const setup = body.code === "DHL_API_KEY_MISSING";
+      result.innerHTML = `<div class="tracking-result ${setup ? "warn" : "err"}">
+        <strong>${setup ? "DHL自動追跡の初期設定が必要です" : "DHLを追跡できませんでした"}</strong>
+        ${esc(message)}<br>${trackingLinkHtml(ctx.r.awb_no)}
+      </div>`;
+      return;
+    }
+    if (!data || data.error) throw new Error(data?.error || "DHLから追跡結果が返りませんでした");
+
+    if (data.delivered && data.delivered_date) {
+      const input = $("[data-arr]", ctx.f);
+      input.value = data.delivered_date;
+      ctx.refresh();
+      result.innerHTML = `<div class="tracking-result ok">
+        <strong>✓ 配達完了　${esc(data.delivered_date)}</strong>
+        DHLの配達完了日を到着日欄へ入力しました。内容を確認し、画面下の「保存」を押してください。
+        <div class="tracking-note">この時点ではまだ台帳へ保存されていません。</div>
+        ${trackingLinkHtml(ctx.r.awb_no)}
+      </div>`;
+      return;
+    }
+
+    const status = data.status || "輸送中または確認中";
+    const at = trackingTimeText(data.last_event_at);
+    result.innerHTML = `<div class="tracking-result info">
+      <strong>現在の状況：${esc(status)}</strong>
+      ${at ? `最終更新：${esc(at)}<br>` : ""}まだ配達完了日は取得できません。到着日欄は変更していません。<br>
+      ${trackingLinkHtml(ctx.r.awb_no)}
+    </div>`;
+  } catch (error) {
+    result.innerHTML = `<div class="tracking-result err">
+      <strong>DHLを追跡できませんでした</strong>
+      ${esc(error.message || error)}<br>${trackingLinkHtml(ctx.r.awb_no)}
+    </div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
 }
 
 function collectDetail(ctx) {
